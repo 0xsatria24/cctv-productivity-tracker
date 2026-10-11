@@ -1,0 +1,29 @@
+# Python caches and local environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Local secrets and application runtime data
+.env
+.env.*
+!.env.example
+secrets/
+credentials/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+runtime/
+backups/
+exports/
+logs/
+
+# Temporary publishing helper
+.publish-github.ps1

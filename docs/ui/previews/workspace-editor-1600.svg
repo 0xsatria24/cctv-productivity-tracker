@@ -1,0 +1,137 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000">
+<title>Proposal desain UI CCTV, tanpa stream atau angka analitik nyata</title>
+<desc>Desain statis untuk review; bukan screenshot aplikasi Qt berjalan.</desc>
+<rect x="0" y="0" width="176" height="1000" rx="0" fill="#181C21"/>
+<line x1="176" y1="0" x2="176" y2="1000" stroke="#35404B" stroke-width="1"/>
+<text x="16.00" y="36.03" fill="#EEF0F3" font-family="Segoe UI,sans-serif" font-size="14.67" font-weight="600">CCTV Workspace</text>
+<text x="16.00" y="61.84" fill="#A2ADBA" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">DESKTOP LOKAL</text>
+<line x1="16" y1="88" x2="160" y2="88" stroke="#35404B" stroke-width="1"/>
+<text x="16.00" y="126.93" fill="#B2BAC5" font-family="Segoe UI,sans-serif" font-size="13.33" font-weight="400">Ringkasan</text>
+<text x="16.00" y="166.93" fill="#B2BAC5" font-family="Segoe UI,sans-serif" font-size="13.33" font-weight="400">Pemantauan Live</text>
+<rect x="8" y="184" width="160" height="36" rx="4" fill="#253F43"/>
+<rect x="8" y="192" width="2" height="20" rx="0" fill="#86BBB7"/>
+<text x="16.00" y="206.93" fill="#86BBB7" font-family="Segoe UI,sans-serif" font-size="13.33" font-weight="400">Workstation</text>
+<text x="16.00" y="246.93" fill="#B2BAC5" font-family="Segoe UI,sans-serif" font-size="13.33" font-weight="400">Analitik</text>
+<text x="16.00" y="286.93" fill="#B2BAC5" font-family="Segoe UI,sans-serif" font-size="13.33" font-weight="400">Laporan</text>
+<text x="16.00" y="326.93" fill="#B2BAC5" font-family="Segoe UI,sans-serif" font-size="13.33" font-weight="400">Kamera</text>
+<text x="16.00" y="366.93" fill="#B2BAC5" font-family="Segoe UI,sans-serif" font-size="13.33" font-weight="400">Pengaturan</text>
+<text x="16.00" y="897.84" fill="#B2BAC5" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Akses lokal</text>
+<text x="16.00" y="921.84" fill="#A2ADBA" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Mengikuti akun OS</text>
+<rect x="176" y="0" width="1424" height="88" rx="0" fill="#14171C"/>
+<text x="192.00" y="36.40" fill="#EEF0F3" font-family="Segoe UI,sans-serif" font-size="20.00" font-weight="600">Editor Workstation</text>
+<text x="192.00" y="64.93" fill="#B2BAC5" font-family="Segoe UI,sans-serif" font-size="13.33" font-weight="400">Geometri draft dipisahkan dari konfigurasi yang sudah diterapkan.</text>
+<text x="1493.00" y="33.84" fill="#86BBB7" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">PREVIEW DESAIN</text>
+<text x="1492.52" y="57.84" fill="#A2ADBA" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Tanpa data CCTV</text>
+<line x1="176" y1="88" x2="1600" y2="88" stroke="#35404B" stroke-width="1"/>
+<rect x="176" y="972" width="1424" height="28" rx="0" fill="#181C21"/>
+<line x1="176" y1="972" x2="1600" y2="972" stroke="#35404B" stroke-width="1"/>
+<text x="192.00" y="989.84" fill="#D8BA7B" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Engine tidak tersambung</text>
+<text x="396.00" y="989.84" fill="#B2BAC5" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Tersimpan sampai: N/A</text>
+<text x="616.00" y="989.84" fill="#B2BAC5" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Timezone lokasi: belum diatur</text>
+<text x="1468.00" y="989.84" fill="#B2BAC5" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Monitoring tidak aktif</text>
+<rect x="192" y="104" width="208" height="852" rx="4" fill="#1B2027" stroke="#35404B" stroke-width="1"/>
+<rect x="192" y="104" width="208" height="36" rx="0" fill="#1B2027"/>
+<text x="204.00" y="128.03" fill="#EEF0F3" font-family="Segoe UI,sans-serif" font-size="14.67" font-weight="600">Workstation</text>
+<line x1="192" y1="140" x2="400" y2="140" stroke="#35404B" stroke-width="1"/>
+<rect x="196" y="156" width="200" height="72" rx="4" fill="#253F43"/>
+<text x="204.00" y="180.03" fill="#EEF0F3" font-family="Segoe UI,sans-serif" font-size="14.67" font-weight="600">Desk A01</text>
+<text x="204.00" y="205.84" fill="#D8BA7B" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Draft belum disimpan</text>
+<text x="204.00" y="270.93" fill="#B2BAC5" font-family="Segoe UI,sans-serif" font-size="13.33" font-weight="400">Pilih satu kamera utama untuk</text>
+<text x="204.00" y="287.93" fill="#B2BAC5" font-family="Segoe UI,sans-serif" font-size="13.33" font-weight="400">perhitungan setiap zona.</text>
+<line x1="204" y1="780" x2="388" y2="780" stroke="#35404B" stroke-width="1"/>
+<text x="204.00" y="809.84" fill="#A2ADBA" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Perubahan polygon membuat</text>
+<text x="204.00" y="825.84" fill="#A2ADBA" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">revisi baru. Histori memakai revisi</text>
+<text x="204.00" y="841.84" fill="#A2ADBA" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">asalnya.</text>
+<rect x="412" y="104" width="864" height="852" rx="4" fill="#1B2027" stroke="#35404B" stroke-width="1"/>
+<rect x="412" y="104" width="864" height="36" rx="0" fill="#1B2027"/>
+<text x="424.00" y="128.03" fill="#EEF0F3" font-family="Segoe UI,sans-serif" font-size="14.67" font-weight="600">Frame acuan editor</text>
+<text x="1173.00" y="125.84" fill="#86BBB7" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">CAM-01 · contoh</text>
+<line x1="412" y1="140" x2="1276" y2="140" stroke="#35404B" stroke-width="1"/>
+<text x="424.00" y="166.93" fill="#86BBB7" font-family="Segoe UI,sans-serif" font-size="13.33" font-weight="400">Polygon</text>
+<text x="500.00" y="166.93" fill="#B2BAC5" font-family="Segoe UI,sans-serif" font-size="13.33" font-weight="400">Undo</text>
+<text x="556.00" y="166.93" fill="#B2BAC5" font-family="Segoe UI,sans-serif" font-size="13.33" font-weight="400">Redo</text>
+<text x="1148.00" y="165.84" fill="#D8BA7B" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Frame belum tersedia</text>
+<rect x="424" y="188" width="840" height="472.5" rx="0" fill="#101318"/>
+<rect x="424.0" y="188" width="840" height="472.5" rx="0" fill="#101318" stroke="#35404B" stroke-width="1"/>
+<rect x="440.0" y="204" width="808" height="440.5" rx="0" fill="#1B2027" stroke="#35404B" stroke-width="1"/>
+<polygon points="575.20,358.10 751.60,358.10 776.80,414.80 726.40,438.43 566.80,424.25" fill="#253F43" stroke="#86BBB7" stroke-width="2"/>
+<rect x="608.8" y="306.125" width="109.2" height="61.425000000000004" rx="2" fill="#242B34" stroke="#667789" stroke-width="1"/>
+<rect x="641.56" y="375.55" width="43.68000000000001" height="19.656000000000002" rx="4" fill="#242B34" stroke="#35404B" stroke-width="1"/>
+<rect x="902.8" y="306.125" width="109.2" height="61.425000000000004" rx="2" fill="#242B34" stroke="#667789" stroke-width="1"/>
+<rect x="935.56" y="375.55" width="43.68000000000001" height="19.656000000000002" rx="4" fill="#242B34" stroke="#35404B" stroke-width="1"/>
+<rect x="1070.8000000000002" y="306.125" width="109.2" height="61.425000000000004" rx="2" fill="#242B34" stroke="#667789" stroke-width="1"/>
+<rect x="1103.5600000000002" y="375.55" width="43.68000000000001" height="19.656000000000002" rx="4" fill="#242B34" stroke="#35404B" stroke-width="1"/>
+<rect x="608.8" y="452.6" width="109.2" height="61.425000000000004" rx="2" fill="#242B34" stroke="#667789" stroke-width="1"/>
+<rect x="641.56" y="522.025" width="43.68000000000001" height="19.656000000000002" rx="4" fill="#242B34" stroke="#35404B" stroke-width="1"/>
+<rect x="902.8" y="452.6" width="109.2" height="61.425000000000004" rx="2" fill="#242B34" stroke="#667789" stroke-width="1"/>
+<rect x="935.56" y="522.025" width="43.68000000000001" height="19.656000000000002" rx="4" fill="#242B34" stroke="#35404B" stroke-width="1"/>
+<rect x="1070.8000000000002" y="452.6" width="109.2" height="61.425000000000004" rx="2" fill="#242B34" stroke="#667789" stroke-width="1"/>
+<rect x="1103.5600000000002" y="522.025" width="43.68000000000001" height="19.656000000000002" rx="4" fill="#242B34" stroke="#35404B" stroke-width="1"/>
+<text x="440.00" y="221.84" fill="#B2BAC5" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">ILUSTRASI FRAME ACUAN · BUKAN CCTV</text>
+<rect x="575.2" y="330.1" width="116" height="24" rx="0" fill="#253F43"/>
+<text x="583.20" y="344.94" fill="#86BBB7" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Desk A01 · draft</text>
+<rect x="571.2" y="354.1" width="8" height="8" rx="0" fill="#86BBB7" stroke="#EEF0F3" stroke-width="1"/>
+<text x="583.20" y="375.94" fill="#EEF0F3" font-family="Consolas,sans-serif" font-size="12.00" font-weight="400">1</text>
+<rect x="747.6" y="354.1" width="8" height="8" rx="0" fill="#86BBB7" stroke="#EEF0F3" stroke-width="1"/>
+<text x="759.60" y="375.94" fill="#EEF0F3" font-family="Consolas,sans-serif" font-size="12.00" font-weight="400">2</text>
+<rect x="772.8" y="410.79999999999995" width="8" height="8" rx="0" fill="#86BBB7" stroke="#EEF0F3" stroke-width="1"/>
+<text x="784.80" y="432.64" fill="#EEF0F3" font-family="Consolas,sans-serif" font-size="12.00" font-weight="400">3</text>
+<rect x="722.4" y="434.425" width="8" height="8" rx="0" fill="#86BBB7" stroke="#EEF0F3" stroke-width="1"/>
+<text x="734.40" y="456.26" fill="#EEF0F3" font-family="Consolas,sans-serif" font-size="12.00" font-weight="400">4</text>
+<rect x="562.8" y="420.25" width="8" height="8" rx="0" fill="#86BBB7" stroke="#EEF0F3" stroke-width="1"/>
+<text x="574.80" y="442.09" fill="#EEF0F3" font-family="Consolas,sans-serif" font-size="12.00" font-weight="400">5</text>
+<text x="440.00" y="642.34" fill="#A2ADBA" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Polygon mencakup area occupant duduk.</text>
+<text x="424.00" y="688.53" fill="#EEF0F3" font-family="Segoe UI,sans-serif" font-size="14.67" font-weight="600">Vertex draft</text>
+<text x="1127.50" y="686.34" fill="#A2ADBA" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Koordinat normalized 0..1</text>
+<line x1="424" y1="704.5" x2="1264" y2="704.5" stroke="#35404B" stroke-width="1"/>
+<text x="432.00" y="726.34" fill="#A2ADBA" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Titik</text>
+<text x="528.00" y="726.34" fill="#A2ADBA" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">X</text>
+<text x="608.00" y="726.34" fill="#A2ADBA" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Y</text>
+<text x="704.00" y="726.34" fill="#A2ADBA" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Validasi</text>
+<text x="432.00" y="750.34" fill="#EEF0F3" font-family="Consolas,sans-serif" font-size="12.00" font-weight="400">1</text>
+<text x="528.00" y="750.34" fill="#EEF0F3" font-family="Consolas,sans-serif" font-size="12.00" font-weight="400">0.18</text>
+<text x="608.00" y="750.34" fill="#EEF0F3" font-family="Consolas,sans-serif" font-size="12.00" font-weight="400">0.36</text>
+<text x="704.00" y="750.34" fill="#B2BAC5" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Dalam frame</text>
+<text x="432.00" y="774.34" fill="#EEF0F3" font-family="Consolas,sans-serif" font-size="12.00" font-weight="400">2</text>
+<text x="528.00" y="774.34" fill="#EEF0F3" font-family="Consolas,sans-serif" font-size="12.00" font-weight="400">0.39</text>
+<text x="608.00" y="774.34" fill="#EEF0F3" font-family="Consolas,sans-serif" font-size="12.00" font-weight="400">0.36</text>
+<text x="704.00" y="774.34" fill="#B2BAC5" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Dalam frame</text>
+<text x="432.00" y="798.34" fill="#EEF0F3" font-family="Consolas,sans-serif" font-size="12.00" font-weight="400">3</text>
+<text x="528.00" y="798.34" fill="#EEF0F3" font-family="Consolas,sans-serif" font-size="12.00" font-weight="400">0.42</text>
+<text x="608.00" y="798.34" fill="#EEF0F3" font-family="Consolas,sans-serif" font-size="12.00" font-weight="400">0.48</text>
+<text x="704.00" y="798.34" fill="#B2BAC5" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Dalam frame</text>
+<text x="432.00" y="822.34" fill="#EEF0F3" font-family="Consolas,sans-serif" font-size="12.00" font-weight="400">4</text>
+<text x="528.00" y="822.34" fill="#EEF0F3" font-family="Consolas,sans-serif" font-size="12.00" font-weight="400">0.36</text>
+<text x="608.00" y="822.34" fill="#EEF0F3" font-family="Consolas,sans-serif" font-size="12.00" font-weight="400">0.53</text>
+<text x="704.00" y="822.34" fill="#B2BAC5" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Dalam frame</text>
+<text x="432.00" y="846.34" fill="#EEF0F3" font-family="Consolas,sans-serif" font-size="12.00" font-weight="400">5</text>
+<text x="528.00" y="846.34" fill="#EEF0F3" font-family="Consolas,sans-serif" font-size="12.00" font-weight="400">0.17</text>
+<text x="608.00" y="846.34" fill="#EEF0F3" font-family="Consolas,sans-serif" font-size="12.00" font-weight="400">0.50</text>
+<text x="704.00" y="846.34" fill="#B2BAC5" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Dalam frame</text>
+<rect x="1288" y="104" width="296" height="852" rx="4" fill="#1B2027" stroke="#35404B" stroke-width="1"/>
+<rect x="1288" y="104" width="296" height="36" rx="0" fill="#1B2027"/>
+<text x="1300.00" y="128.03" fill="#EEF0F3" font-family="Segoe UI,sans-serif" font-size="14.67" font-weight="600">Properti zona</text>
+<line x1="1288" y1="140" x2="1584" y2="140" stroke="#35404B" stroke-width="1"/>
+<text x="1304.00" y="165.84" fill="#B2BAC5" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Nama workstation</text>
+<rect x="1304" y="180" width="264" height="32" rx="4" fill="#242B34" stroke="#667789" stroke-width="1"/>
+<text x="1312.00" y="198.93" fill="#EEF0F3" font-family="Segoe UI,sans-serif" font-size="13.33" font-weight="400">Desk A01</text>
+<text x="1304.00" y="237.84" fill="#B2BAC5" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Jenis</text>
+<rect x="1304" y="252" width="264" height="32" rx="4" fill="#242B34" stroke="#667789" stroke-width="1"/>
+<text x="1312.00" y="270.93" fill="#EEF0F3" font-family="Segoe UI,sans-serif" font-size="13.33" font-weight="400">Desk</text>
+<text x="1304.00" y="309.84" fill="#B2BAC5" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Kapasitas</text>
+<rect x="1304" y="324" width="264" height="32" rx="4" fill="#242B34" stroke="#667789" stroke-width="1"/>
+<text x="1312.00" y="342.93" fill="#EEF0F3" font-family="Segoe UI,sans-serif" font-size="13.33" font-weight="400">1 occupant</text>
+<text x="1304.00" y="381.84" fill="#B2BAC5" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Kamera utama</text>
+<rect x="1304" y="396" width="264" height="32" rx="4" fill="#242B34" stroke="#667789" stroke-width="1"/>
+<text x="1312.00" y="414.93" fill="#EEF0F3" font-family="Segoe UI,sans-serif" font-size="13.33" font-weight="400">CAM-01 (contoh)</text>
+<text x="1304.00" y="453.84" fill="#B2BAC5" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Rule preset</text>
+<rect x="1304" y="468" width="264" height="32" rx="4" fill="#242B34" stroke="#667789" stroke-width="1"/>
+<text x="1312.00" y="486.93" fill="#EEF0F3" font-family="Segoe UI,sans-serif" font-size="13.33" font-weight="400">Belum dipilih</text>
+<text x="1304.00" y="525.84" fill="#B2BAC5" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Geometri draft: valid, 5 titik. Frame acuan dan</text>
+<text x="1304.00" y="541.84" fill="#B2BAC5" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">rule diperlukan sebelum simpan.</text>
+<text x="1304.00" y="573.84" fill="#A2ADBA" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Revisi belum disimpan. Monitoring belum</text>
+<text x="1304.00" y="589.84" fill="#A2ADBA" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">dimulai dari draft ini.</text>
+<rect x="1304" y="880" width="264" height="32" rx="4" fill="#242B34" stroke="#35404B" stroke-width="1"/>
+<text x="1396.75" y="898.93" fill="#6F7A88" font-family="Segoe UI,sans-serif" font-size="13.33" font-weight="400">Simpan revisi</text>
+<text x="1304.00" y="933.84" fill="#A2ADBA" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Ctrl+S · setelah draft lengkap</text>
+</svg>

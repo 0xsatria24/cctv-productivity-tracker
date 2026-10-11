@@ -1,0 +1,187 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ZoneObservation v1",
+  "description": "Internal domain input, not a public HTTP request. Monotonic nanoseconds are decimal text to avoid JSON-number precision issues.",
+  "type": "object",
+  "required": [
+    "engine_run_id",
+    "camera_id",
+    "generation_id",
+    "workspace_id",
+    "configuration_id",
+    "frame_seq",
+    "observed_monotonic_ns",
+    "observed_utc_us",
+    "evidence",
+    "observed_count",
+    "quality",
+    "reason"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "engine_run_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "camera_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "generation_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "workspace_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "configuration_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "frame_seq": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "observed_monotonic_ns": {
+      "type": "string",
+      "pattern": "^[0-9]+$"
+    },
+    "observed_utc_us": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "evidence": {
+      "type": "string",
+      "enum": [
+        "OCCUPIED",
+        "EMPTY",
+        "UNKNOWN"
+      ]
+    },
+    "observed_count": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 10000
+    },
+    "quality": {
+      "type": "string",
+      "enum": [
+        "VALID",
+        "UNCERTAIN",
+        "UNAVAILABLE"
+      ]
+    },
+    "reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        null,
+        "STARTUP",
+        "PENDING_CONFIRMATION",
+        "CAMERA_OFFLINE",
+        "FRAME_STALE",
+        "INFERENCE_TIMEOUT",
+        "QUALITY_LOW",
+        "ZONE_AMBIGUOUS",
+        "SCENE_CHANGED",
+        "PERSISTENCE_GAP",
+        "ENGINE_INTERRUPTED",
+        "CONFIG_CHANGE",
+        "CLOCK_DISCONTINUITY",
+        "COUNT_UNCERTAIN"
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "evidence": {
+            "const": "EMPTY"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "observed_count": {
+            "const": 0
+          },
+          "quality": {
+            "const": "VALID"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "evidence": {
+            "const": "OCCUPIED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "observed_count": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "quality": {
+            "const": "VALID"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "evidence": {
+            "const": "UNKNOWN"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "observed_count": {
+            "type": "null"
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "quality": {
+            "enum": [
+              "UNCERTAIN",
+              "UNAVAILABLE"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "evidence": {
+            "const": "UNKNOWN"
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,115 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="720" viewBox="0 0 1100 720">
+<title>Proposal desain UI CCTV, tanpa stream atau angka analitik nyata</title>
+<desc>Desain statis untuk review; bukan screenshot aplikasi Qt berjalan.</desc>
+<rect x="0" y="0" width="144" height="720" rx="0" fill="#181C21"/>
+<line x1="144" y1="0" x2="144" y2="720" stroke="#35404B" stroke-width="1"/>
+<text x="16.00" y="34.93" fill="#EEF0F3" font-family="Segoe UI,sans-serif" font-size="13.33" font-weight="400">CCTV Workspace</text>
+<text x="16.00" y="61.84" fill="#A2ADBA" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">DESKTOP LOKAL</text>
+<line x1="16" y1="88" x2="128" y2="88" stroke="#35404B" stroke-width="1"/>
+<text x="16.00" y="126.93" fill="#B2BAC5" font-family="Segoe UI,sans-serif" font-size="13.33" font-weight="400">Ringkasan</text>
+<rect x="8" y="144" width="128" height="36" rx="4" fill="#253F43"/>
+<rect x="8" y="152" width="2" height="20" rx="0" fill="#86BBB7"/>
+<text x="16.00" y="166.93" fill="#86BBB7" font-family="Segoe UI,sans-serif" font-size="13.33" font-weight="400">Pemantauan Live</text>
+<text x="16.00" y="206.93" fill="#B2BAC5" font-family="Segoe UI,sans-serif" font-size="13.33" font-weight="400">Workstation</text>
+<text x="16.00" y="246.93" fill="#B2BAC5" font-family="Segoe UI,sans-serif" font-size="13.33" font-weight="400">Analitik</text>
+<text x="16.00" y="286.93" fill="#B2BAC5" font-family="Segoe UI,sans-serif" font-size="13.33" font-weight="400">Laporan</text>
+<text x="16.00" y="326.93" fill="#B2BAC5" font-family="Segoe UI,sans-serif" font-size="13.33" font-weight="400">Kamera</text>
+<text x="16.00" y="366.93" fill="#B2BAC5" font-family="Segoe UI,sans-serif" font-size="13.33" font-weight="400">Pengaturan</text>
+<text x="16.00" y="617.84" fill="#B2BAC5" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Akses lokal</text>
+<text x="16.00" y="641.84" fill="#A2ADBA" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Mengikuti akun OS</text>
+<rect x="144" y="0" width="956" height="88" rx="0" fill="#14171C"/>
+<text x="160.00" y="36.40" fill="#EEF0F3" font-family="Segoe UI,sans-serif" font-size="20.00" font-weight="600">Pemantauan Live</text>
+<text x="160.00" y="64.93" fill="#B2BAC5" font-family="Segoe UI,sans-serif" font-size="13.33" font-weight="400">Status stream dan observasi zona ditampilkan terpisah.</text>
+<text x="993.00" y="33.84" fill="#86BBB7" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">PREVIEW DESAIN</text>
+<text x="992.52" y="57.84" fill="#A2ADBA" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Tanpa data CCTV</text>
+<line x1="144" y1="88" x2="1100" y2="88" stroke="#35404B" stroke-width="1"/>
+<rect x="144" y="692" width="956" height="28" rx="0" fill="#181C21"/>
+<line x1="144" y1="692" x2="1100" y2="692" stroke="#35404B" stroke-width="1"/>
+<text x="160.00" y="709.84" fill="#D8BA7B" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Engine tidak tersambung</text>
+<text x="364.00" y="709.84" fill="#B2BAC5" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Tersimpan sampai: N/A</text>
+<text x="968.00" y="709.84" fill="#B2BAC5" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Monitoring tidak aktif</text>
+<rect x="160" y="104" width="176" height="572" rx="4" fill="#1B2027" stroke="#35404B" stroke-width="1"/>
+<rect x="160" y="104" width="176" height="36" rx="0" fill="#1B2027"/>
+<text x="172.00" y="128.03" fill="#EEF0F3" font-family="Segoe UI,sans-serif" font-size="14.67" font-weight="600">Daftar kamera</text>
+<line x1="160" y1="140" x2="336" y2="140" stroke="#35404B" stroke-width="1"/>
+<rect x="164" y="148" width="168" height="72" rx="4" fill="#253F43"/>
+<rect x="164" y="156" width="2" height="56" rx="0" fill="#86BBB7"/>
+<text x="172.00" y="166.93" fill="#EEF0F3" font-family="Segoe UI,sans-serif" font-size="13.33" font-weight="400">Area produksi</text>
+<text x="172.00" y="185.84" fill="#A2ADBA" font-family="Consolas,sans-serif" font-size="12.00" font-weight="400">CAM-01</text>
+<text x="172.00" y="205.84" fill="#B2BAC5" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Tanpa stream</text>
+<text x="172.00" y="246.93" fill="#EEF0F3" font-family="Segoe UI,sans-serif" font-size="13.33" font-weight="400">Area perakitan</text>
+<text x="172.00" y="265.84" fill="#A2ADBA" font-family="Consolas,sans-serif" font-size="12.00" font-weight="400">CAM-02</text>
+<text x="172.00" y="285.84" fill="#E39C96" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Tidak terhubung</text>
+<text x="172.00" y="326.93" fill="#EEF0F3" font-family="Segoe UI,sans-serif" font-size="13.33" font-weight="400">Area pengemasan</text>
+<text x="172.00" y="345.84" fill="#A2ADBA" font-family="Consolas,sans-serif" font-size="12.00" font-weight="400">CAM-03</text>
+<text x="172.00" y="365.84" fill="#D8BA7B" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Kredensial belum diisi</text>
+<text x="172.00" y="406.93" fill="#EEF0F3" font-family="Segoe UI,sans-serif" font-size="13.33" font-weight="400">Gudang</text>
+<text x="172.00" y="425.84" fill="#A2ADBA" font-family="Consolas,sans-serif" font-size="12.00" font-weight="400">CAM-04</text>
+<text x="172.00" y="445.84" fill="#A2ADBA" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Nonaktif</text>
+<line x1="172" y1="568" x2="324" y2="568" stroke="#35404B" stroke-width="1"/>
+<text x="172.00" y="589.84" fill="#A2ADBA" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Nama dan state kamera</text>
+<text x="172.00" y="605.84" fill="#A2ADBA" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">adalah contoh untuk review</text>
+<text x="172.00" y="621.84" fill="#A2ADBA" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">desain.</text>
+<rect x="172" y="632" width="152" height="32" rx="4" fill="#242B34" stroke="#667789" stroke-width="1"/>
+<text x="200.51" y="650.93" fill="#EEF0F3" font-family="Segoe UI,sans-serif" font-size="13.33" font-weight="400">Tambah kamera</text>
+<text x="348.00" y="117.84" fill="#A2ADBA" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">TAMPILAN KAMERA</text>
+<rect x="508" y="104" width="68" height="32" rx="4" fill="#242B34" stroke="#667789" stroke-width="1"/>
+<text x="525.00" y="122.93" fill="#EEF0F3" font-family="Segoe UI,sans-serif" font-size="13.33" font-weight="400">Fokus</text>
+<rect x="584" y="104" width="68" height="32" rx="4" fill="#86BBB7" stroke="#667789" stroke-width="1"/>
+<text x="602.50" y="122.93" fill="#14171C" font-family="Segoe UI,sans-serif" font-size="13.33" font-weight="400">2 × 2</text>
+<rect x="660" y="104" width="68" height="32" rx="4" fill="#242B34" stroke="#667789" stroke-width="1"/>
+<text x="678.50" y="122.93" fill="#EEF0F3" font-family="Segoe UI,sans-serif" font-size="13.33" font-weight="400">3 × 3</text>
+<rect x="980" y="104" width="104" height="32" rx="4" fill="#242B34" stroke="#667789" stroke-width="1"/>
+<text x="991.00" y="122.93" fill="#EEF0F3" font-family="Segoe UI,sans-serif" font-size="13.33" font-weight="400">Detail kamera</text>
+<rect x="348.0" y="148.0" width="362.0" height="202.0" rx="2" fill="#101318" stroke="#86BBB7" stroke-width="1"/>
+<rect x="349.0" y="149.0" width="360.0" height="32" rx="0" fill="#1B2027"/>
+<text x="360.00" y="166.93" fill="#EEF0F3" font-family="Segoe UI,sans-serif" font-size="13.33" font-weight="400">Area produksi</text>
+<text x="659.00" y="165.84" fill="#A2ADBA" font-family="Consolas,sans-serif" font-size="12.00" font-weight="400">CAM-01</text>
+<text x="470.00" y="233.03" fill="#B2BAC5" font-family="Segoe UI,sans-serif" font-size="14.67" font-weight="600">Belum ada frame</text>
+<text x="447.25" y="254.84" fill="#A2ADBA" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Observasi zona belum tersedia</text>
+<rect x="453.0" y="269.0" width="152" height="32" rx="4" fill="#242B34" stroke="#667789" stroke-width="1"/>
+<text x="496.75" y="287.93" fill="#EEF0F3" font-family="Segoe UI,sans-serif" font-size="13.33" font-weight="400">Uji koneksi</text>
+<rect x="349.0" y="325.0" width="360.0" height="24" rx="0" fill="#1B2027"/>
+<text x="360.00" y="341.84" fill="#A2ADBA" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Waktu frame: N/A</text>
+<text x="626.02" y="341.84" fill="#B2BAC5" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Tanpa stream</text>
+<rect x="722.0" y="148.0" width="362.0" height="202.0" rx="2" fill="#101318" stroke="#35404B" stroke-width="1"/>
+<rect x="723.0" y="149.0" width="360.0" height="32" rx="0" fill="#1B2027"/>
+<text x="734.00" y="166.93" fill="#EEF0F3" font-family="Segoe UI,sans-serif" font-size="13.33" font-weight="400">Area perakitan</text>
+<text x="1033.00" y="165.84" fill="#A2ADBA" font-family="Consolas,sans-serif" font-size="12.00" font-weight="400">CAM-02</text>
+<text x="818.75" y="233.03" fill="#E39C96" font-family="Segoe UI,sans-serif" font-size="14.67" font-weight="600">Kamera tidak terhubung</text>
+<text x="821.25" y="254.84" fill="#A2ADBA" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Observasi zona belum tersedia</text>
+<rect x="827.0" y="269.0" width="152" height="32" rx="4" fill="#242B34" stroke="#667789" stroke-width="1"/>
+<text x="856.00" y="287.93" fill="#EEF0F3" font-family="Segoe UI,sans-serif" font-size="13.33" font-weight="400">Buka diagnostik</text>
+<rect x="723.0" y="325.0" width="360.0" height="24" rx="0" fill="#1B2027"/>
+<text x="734.00" y="341.84" fill="#A2ADBA" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Waktu frame: N/A</text>
+<text x="983.50" y="341.84" fill="#E39C96" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Tidak terhubung</text>
+<rect x="348.0" y="362.0" width="362.0" height="202.0" rx="2" fill="#101318" stroke="#35404B" stroke-width="1"/>
+<rect x="349.0" y="363.0" width="360.0" height="32" rx="0" fill="#1B2027"/>
+<text x="360.00" y="380.93" fill="#EEF0F3" font-family="Segoe UI,sans-serif" font-size="13.33" font-weight="400">Area pengemasan</text>
+<text x="659.00" y="379.84" fill="#A2ADBA" font-family="Consolas,sans-serif" font-size="12.00" font-weight="400">CAM-03</text>
+<text x="439.75" y="447.03" fill="#D8BA7B" font-family="Segoe UI,sans-serif" font-size="14.67" font-weight="600">Kredensial belum tersedia</text>
+<text x="447.25" y="468.84" fill="#A2ADBA" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Observasi zona belum tersedia</text>
+<rect x="453.0" y="483.0" width="152" height="32" rx="4" fill="#242B34" stroke="#667789" stroke-width="1"/>
+<text x="491.00" y="501.93" fill="#EEF0F3" font-family="Segoe UI,sans-serif" font-size="13.33" font-weight="400">Isi kredensial</text>
+<rect x="349.0" y="539.0" width="360.0" height="24" rx="0" fill="#1B2027"/>
+<text x="360.00" y="555.84" fill="#A2ADBA" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Waktu frame: N/A</text>
+<text x="581.00" y="555.84" fill="#D8BA7B" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Kredensial belum diisi</text>
+<rect x="722.0" y="362.0" width="362.0" height="202.0" rx="2" fill="#101318" stroke="#35404B" stroke-width="1"/>
+<rect x="723.0" y="363.0" width="360.0" height="32" rx="0" fill="#1B2027"/>
+<text x="734.00" y="380.93" fill="#EEF0F3" font-family="Segoe UI,sans-serif" font-size="13.33" font-weight="400">Gudang</text>
+<text x="1033.00" y="379.84" fill="#A2ADBA" font-family="Consolas,sans-serif" font-size="12.00" font-weight="400">CAM-04</text>
+<text x="826.50" y="447.03" fill="#A2ADBA" font-family="Segoe UI,sans-serif" font-size="14.67" font-weight="600">Kamera dinonaktifkan</text>
+<text x="821.25" y="468.84" fill="#A2ADBA" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Observasi zona belum tersedia</text>
+<rect x="827.0" y="483.0" width="152" height="32" rx="4" fill="#242B34" stroke="#667789" stroke-width="1"/>
+<text x="854.25" y="501.93" fill="#EEF0F3" font-family="Segoe UI,sans-serif" font-size="13.33" font-weight="400">Buka konfigurasi</text>
+<rect x="723.0" y="539.0" width="360.0" height="24" rx="0" fill="#1B2027"/>
+<text x="734.00" y="555.84" fill="#A2ADBA" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Waktu frame: N/A</text>
+<text x="1026.00" y="555.84" fill="#A2ADBA" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Nonaktif</text>
+<rect x="348" y="576" width="736" height="100" rx="4" fill="#1B2027" stroke="#35404B" stroke-width="1"/>
+<rect x="348" y="576" width="736" height="36" rx="0" fill="#1B2027"/>
+<text x="360.00" y="600.03" fill="#EEF0F3" font-family="Segoe UI,sans-serif" font-size="14.67" font-weight="600">Observasi workstation</text>
+<text x="999.00" y="597.84" fill="#86BBB7" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Buka timeline</text>
+<line x1="348" y1="612" x2="1084" y2="612" stroke="#35404B" stroke-width="1"/>
+<text x="360.00" y="638.93" fill="#B2BAC5" font-family="Segoe UI,sans-serif" font-size="13.33" font-weight="400">Belum ada observasi yang dapat ditampilkan.</text>
+<text x="360.00" y="661.84" fill="#A2ADBA" font-family="Segoe UI,sans-serif" font-size="12.00" font-weight="400">Kamera offline tidak dihitung sebagai workstation kosong.</text>
+</svg>
