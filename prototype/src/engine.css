@@ -1,0 +1,21 @@
+.engine-app .engine-filters { align-items: end; }
+.engine-filters .field { min-width: 145px; }
+.engine-filters input[type=datetime-local] { min-width: 185px; }
+.engine-app .engine-banner strong { color: var(--accent-default); }
+.engine-app .engine-banner { flex-wrap: wrap; }
+.engine-connection { color: var(--text-secondary); }
+.engine-facts { display: grid; grid-template-columns: minmax(130px,.8fr) minmax(0,1.2fr); gap: 12px 20px; padding: 20px; margin: 0; }
+.engine-facts dt { color: var(--text-muted); }
+.engine-facts dd { margin: 0; overflow-wrap: anywhere; }
+.engine-breakdown { padding: 16px; }
+.engine-breakdown .chart-legend { margin-bottom: 16px; }
+.engine-replay-controls { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; padding: 20px; }
+.engine-observations { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16px; }
+.engine-state { display: flex; flex-direction: column; gap: 16px; padding: 20px; }
+.engine-form { display: grid; gap: 16px; }
+.engine-explanation { padding: 20px; border-top: 1px solid var(--border-subtle); }
+.engine-zone-map { width: 100%; max-height: 300px; border: 1px solid var(--border-subtle); margin-bottom: 16px; }
+.zone-map-background { fill: var(--surface-video); }
+.engine-app .timeline-segment { min-width: 1px; }
+@media(max-width:1000px){.engine-app .overview-grid{grid-template-columns:minmax(0,1fr)}.engine-filters{flex-wrap:wrap}}
+@media(max-width:760px){.engine-observations{grid-template-columns:1fr}.engine-facts{grid-template-columns:1fr}.engine-app .simulation-toolbar{flex-wrap:wrap}}

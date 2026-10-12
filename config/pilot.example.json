@@ -1,0 +1,10 @@
+{
+  "site_name": "Local pilot",
+  "camera_id": "camera-1",
+  "timezone": "Asia/Jakarta",
+  "inference_fps": 5,
+  "zones": [
+    {"id": "desk-1", "name": "Meja A01", "polygon": [[0.05,0.1],[0.45,0.1],[0.45,0.9],[0.05,0.9]]},
+    {"id": "desk-2", "name": "Meja A02", "polygon": [[0.55,0.1],[0.95,0.1],[0.95,0.9],[0.55,0.9]]}
+  ]
+}

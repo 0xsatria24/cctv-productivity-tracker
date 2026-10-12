@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools==80.9.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cctv-tracker"
+version = "0.1.0"
+description = "Local anonymous workstation occupancy engine"
+requires-python = ">=3.12,<3.13"
+dependencies = ["tzdata==2025.2"]
+
+[project.optional-dependencies]
+vision = ["numpy==2.2.6", "av==16.0.1", "onnxruntime==1.23.2", "opencv-python==4.12.0.88", "supervision==0.26.1"]
+api = ["fastapi==0.115.12", "uvicorn==0.34.3"]
+test = ["pytest==8.4.2", "onnx==1.19.0", "httpx==0.28.1"]
+
+[project.scripts]
+cctv-tracker = "cctv_tracker.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+cctv_tracker = ["resources/*.sql", "resources/*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

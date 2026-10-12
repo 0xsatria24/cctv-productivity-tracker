@@ -1,0 +1,10 @@
+{
+  "sha256": "REPLACE_WITH_SHA256_OF_LOCAL_ONNX_FILE",
+  "license": "REPLACE_WITH_ARTIFACT_LICENSE",
+  "source": "REPLACE_WITH_ARTIFACT_PROVENANCE",
+  "input_size": 640,
+  "output_format": "xyxy_score_class",
+  "person_class_ids": [0],
+  "confidence": 0.1,
+  "nms_iou": 0.5
+}
