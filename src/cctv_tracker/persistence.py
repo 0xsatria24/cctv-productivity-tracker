@@ -57,7 +57,7 @@ class Database:
 
     def migrate(self):
         scripts = [files("cctv_tracker").joinpath("resources", name).read_text(encoding="utf-8")
-                   for name in ("001_initial.sql", "002_assignments.sql")]
+                   for name in ("001_initial.sql", "002_assignments.sql", "003_live.sql")]
         version = self.conn.execute("PRAGMA user_version").fetchone()[0]
         if version > len(scripts):
             raise ValueError("Database schema is newer than this application")
@@ -75,7 +75,7 @@ class Database:
             else:
                 for previous, source in enumerate(scripts[:index], start=1):
                     digest = hashlib.sha256(source.encode()).hexdigest()
-                    suffix += f"INSERT INTO runtime_migration_checksums VALUES({previous},'{digest}');"
+                    suffix += f"INSERT OR IGNORE INTO runtime_migration_checksums VALUES({previous},'{digest}');"
             try:
                 self.conn.executescript(f"BEGIN EXCLUSIVE;\n{body}\n{suffix}\nPRAGMA user_version={index};\nCOMMIT;")
             except BaseException:
@@ -102,7 +102,10 @@ class Database:
             conn.execute("INSERT OR IGNORE INTO model_artifacts VALUES(?,?,?,?,?)",
                          (model_id, model_sha, "external-local-artifact", json.dumps(model_manifest), start))
             conn.execute("INSERT INTO engine_runs VALUES(?,?,?,?,?,?,?)",
-                         (run_id, model_id, "0.1.0", json.dumps({"data_source": source, "identity_source": "anonymous"}), start, None, None))
+                         (run_id, model_id, "0.2.0", json.dumps({"data_source": source, "identity_source": "anonymous",
+                          "workspace_ids": [stable_id("workspace:" + settings.camera_id + ":" + z.id) for z in settings.zones],
+                          'model_sha256': model_sha, 'calibration_revision': model_manifest.get('calibration_revision'),
+                          'inference_runtime': {k: model_manifest[k] for k in ('provider','runtime_version','requested_device','execution_devices','device_name','precision','performance_hint','threads') if k in model_manifest}}), start, None, None))
             # A stopped/crashed run cannot carry occupied evidence into this run.
             old = conn.execute("SELECT id, start_utc_us,evidence_until_utc_us FROM zone_intervals WHERE end_utc_us IS NULL").fetchall()
             if any(start < row["evidence_until_utc_us"] for row in old):
@@ -119,14 +122,21 @@ class Database:
                 conn.execute("UPDATE camera_generations SET ended_utc_us=? WHERE engine_run_id=? AND ended_utc_us IS NULL", (last,previous["id"]))
                 conn.execute("DELETE FROM track_visits WHERE generation_id IN (SELECT id FROM camera_generations WHERE engine_run_id=?) AND end_utc_us IS NULL AND start_utc_us=last_observed_utc_us", (previous["id"],))
                 conn.execute("UPDATE track_visits SET end_utc_us=last_observed_utc_us WHERE generation_id IN (SELECT id FROM camera_generations WHERE engine_run_id=?) AND end_utc_us IS NULL", (previous["id"],))
+            desired = {stable_id('workspace:' + settings.camera_id + ':' + z.id) for z in settings.zones}
+            for old_config in conn.execute("SELECT id,workspace_id FROM workspace_configurations WHERE camera_id=? AND effective_to_utc_us IS NULL", (camera_id,)).fetchall():
+                if old_config['workspace_id'] not in desired:
+                    conn.execute('UPDATE workspace_configurations SET effective_to_utc_us=? WHERE id=?', (start, old_config['id']))
+                    conn.execute('UPDATE workspaces SET monitoring_to_utc_us=? WHERE id=?', (start, old_config['workspace_id']))
             for zone in settings.zones:
                 workspace_id = stable_id("workspace:" + settings.camera_id + ":" + zone.id)
                 conn.execute("INSERT OR IGNORE INTO workspaces VALUES(?,?,?,?,?,?,?,?)",
                              (workspace_id, site_id, zone.name, "desk", 1, zone.exclusive_group, start, None))
+                conn.execute("UPDATE workspaces SET name=?,exclusive_group=?,monitoring_to_utc_us=NULL WHERE id=?", (zone.name, zone.exclusive_group, workspace_id))
                 # Existing monitoring lifetime is immutable; changed geometry creates a revision.
                 polygon = json.dumps(zone.polygon)
                 active = conn.execute("SELECT * FROM workspace_configurations WHERE workspace_id=? AND effective_to_utc_us IS NULL", (workspace_id,)).fetchone()
-                if active and (active["polygon_json"] != polygon or active["rule_set_id"] != rule_id):
+                frame_width, frame_height = model_manifest.get('calibration_width', 1), model_manifest.get('calibration_height', 1)
+                if active and (active["polygon_json"] != polygon or active["rule_set_id"] != rule_id or active['reference_width'] != frame_width or active['reference_height'] != frame_height):
                     if start <= active["effective_from_utc_us"]:
                         raise ValueError("Configuration must advance its effective timestamp")
                     conn.execute("UPDATE workspace_configurations SET effective_to_utc_us=? WHERE id=?", (start, active["id"]))
@@ -137,13 +147,20 @@ class Database:
                     revision = conn.execute("SELECT COALESCE(MAX(revision),0)+1 FROM workspace_configurations WHERE workspace_id=?", (workspace_id,)).fetchone()[0]
                     config_id = str(uuid4())
                     conn.execute("INSERT INTO workspace_configurations VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                                 (config_id, workspace_id, camera_id, rule_id, revision, polygon, 1, 1, "single-camera-calibration-required", start, None))
+                                 (config_id, workspace_id, camera_id, rule_id, revision, polygon, frame_width, frame_height, "single-camera-calibrated" if frame_width > 1 else "single-camera-calibration-required", start, None))
                 configs[zone.id] = (workspace_id, config_id)
         return RunWriter(self, run_id, camera_id, configs)
 
     def report(self, start, end, *, run_id=None):
         result = []
+        allowed = None
+        if run_id:
+            manifest = self.conn.execute("SELECT runtime_manifest_json FROM engine_runs WHERE id=?", (run_id,)).fetchone()
+            if manifest:
+                allowed = json.loads(manifest[0]).get("workspace_ids")
         for workspace in self.conn.execute("SELECT * FROM workspaces ORDER BY name"):
+            if allowed is not None and workspace["id"] not in allowed:
+                continue
             left = max(start, workspace["monitoring_from_utc_us"])
             right = min(end, workspace["monitoring_to_utc_us"] or end)
             if right <= left:
@@ -186,7 +203,7 @@ class RunWriter:
         self.seq = 0
         self.generation = None
 
-    def commit(self, accumulators, observed_at, event_type="CHECKPOINT", *, generation, frame_seq, monotonic_ns, visits):
+    def commit(self, accumulators, observed_at, event_type="CHECKPOINT", *, generation, frame_seq, monotonic_ns, visits, transitions=()):
         next_seq = self.seq + 1
         with self.db.transaction() as conn:
             event_seq = conn.execute("INSERT INTO event_log(event_id,engine_run_id,producer_seq,event_type,observed_utc_us,recorded_utc_us,payload_version,payload_json) VALUES(?,?,?,?,?,?,?,?)",
@@ -227,6 +244,11 @@ class RunWriter:
             for workspace_id, _ in self.configs.values():
                 active_start = next(a.current.start for alias, a in accumulators.items() if self.configs[alias][0] == workspace_id)
                 conn.execute("DELETE FROM zone_intervals WHERE engine_run_id=? AND workspace_id=? AND start_utc_us= evidence_until_utc_us AND start_utc_us<>?", (self.run_id, workspace_id, active_start))
+            for transition in transitions:
+                next_seq += 1
+                conn.execute("INSERT INTO event_log(event_id,engine_run_id,producer_seq,event_type,observed_utc_us,recorded_utc_us,payload_version,payload_json) VALUES(?,?,?,?,?,?,?,?)",
+                    (str(uuid4()), self.run_id, next_seq, transition["type"], observed_at, now_us(), 1,
+                     json.dumps({**transition, "generation_id": generation, "frame_seq": frame_seq, "identity_source": "anonymous"})))
         self.seq = next_seq
         self.generation = generation
         for accumulator in accumulators.values():

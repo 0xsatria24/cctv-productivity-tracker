@@ -11,7 +11,7 @@ from .persistence import stable_id
 
 
 class Pipeline:
-    def __init__(self, settings, database, start, source, model_sha, model_manifest):
+    def __init__(self, settings, database, start, source, model_sha, model_manifest, *, live_events=False):
         if not settings.zones:
             raise ValueError("At least one calibrated zone is required")
         self.settings, self.database, self.start, self.last_utc = settings, database, start, start
@@ -24,10 +24,13 @@ class Pipeline:
             self.lease.close()
             raise
         self.last_sequence = None
+        self.live_events = live_events
+        self.confirmed = {}
 
     def feed(self, detections, utc_us, monotonic_ns, seq, generation, unavailable=None):
         scoped_generation = stable_id(self.writer.run_id + ":" + generation)
         visits = []
+        tracked = []
         if unavailable:
             mapped = {z.id: (State.UNKNOWN, None, unavailable) for z in self.settings.zones}
         else:
@@ -38,16 +41,35 @@ class Pipeline:
                     continue
                 targets = associate([detection], self.settings.zones, self.settings.rules)
                 visits.extend((detection.track_id, alias) for alias, row in targets.items() if row[0] == State.OCCUPIED)
+        previous_states = {alias: a.current.state for alias, a in self.accumulators.items()}
+        previous_candidates = {alias: a.candidate for alias, a in self.accumulators.items()}
         for alias, accumulator in self.accumulators.items():
             state, count, reason = mapped[alias]
             accumulator.feed(Observation(utc_us, monotonic_ns, seq, generation, state, count, reason))
+        transitions = []
+        if self.live_events:
+            for alias, accumulator in self.accumulators.items():
+                current = accumulator.current
+                if current.state != State.UNKNOWN and previous_states[alias] != current.state:
+                    candidate = previous_candidates[alias]
+                    transitions.append({"type": "ENTER" if current.state == State.OCCUPIED else "EXIT" if self.confirmed.get(alias) == State.OCCUPIED else "EMPTY_CONFIRMED",
+                                        "zone_id": alias, "state": current.state, "count": current.count,
+                                        "evidence_first_utc_us": utc_us - (monotonic_ns - candidate[1]) // 1000 if candidate else utc_us,
+                                        "confirmation_utc_us": utc_us})
+                    self.confirmed[alias] = current.state
         try:
-            self.writer.commit(self.accumulators, utc_us, generation=scoped_generation, frame_seq=seq, monotonic_ns=monotonic_ns, visits=visits)
+            self.writer.commit(self.accumulators, utc_us, generation=scoped_generation, frame_seq=seq, monotonic_ns=monotonic_ns, visits=visits, transitions=transitions)
         except Exception:
             # The owning command aborts; uncommitted memory is never retried as evidence.
             logging.getLogger("cctv_tracker").error("PERSISTENCE_GAP: accounting stopped")
             raise
         self.last_utc = utc_us
+        return {"run_id": self.writer.run_id, "committed_sequence": self.writer.seq,
+                "detections": [dataclass_detection(d) for d in tracked],
+                "zones": [{"id": alias, "name": next(z.name for z in self.settings.zones if z.id == alias),
+                           "state": a.current.state, "count": a.current.count, "reason": a.current.reason,
+                           "state_since_utc_us": a.current.start, "evidence_until_utc_us": a.current.until}
+                          for alias, a in self.accumulators.items()]}
 
     def finish(self, reason="COMPLETED"):
         try:
@@ -55,6 +77,10 @@ class Pipeline:
             return self.database.report(self.start, max(self.last_utc, self.start + 1), run_id=self.writer.run_id)
         finally:
             self.lease.close()
+
+
+def dataclass_detection(d):
+    return {"box": d.box, "confidence": d.confidence, "track_id": d.track_id}
 
 
 def replay(path: Path, settings, database):

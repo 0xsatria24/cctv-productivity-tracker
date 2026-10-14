@@ -2,6 +2,10 @@
 
 Implemented on 12 October 2026 at the user's request. The shared React frontend now has a pilot engine mode that reads committed SQLite data through FastAPI. One loopback server serves both the built dashboard and API. The design-only mock mode is still independently available on Vite's development server.
 
+Update 14 October: Kamera and Pemantauan Live now use a multi-camera preview wall with 1/4/9/16 layouts, focus and fullscreen. The same webcam session survives layout/navigation changes. Extra RTSP previews are visibility-bound and do not change reporting. See [CAMERA-WALL.md](CAMERA-WALL.md).
+
+Update 13 October: webcam capture, RTSP, tracking, calibration and live occupancy reports are available. See [LIVE-ENGINE.md](LIVE-ENGINE.md) for the 14 October increment. See [webcam setup and boundaries](WEBCAM.md). Webcam preview is ephemeral; explicitly started live accounting writes a separate live SQLite ledger; statements below about unavailable live capture refer to engine/RTSP capture.
+
 ## Launch the integrated application
 
 The project's Python environment and frontend dependencies are already installed on this machine. Open PowerShell at the repository root:
@@ -34,11 +38,11 @@ $env:MPLCONFIGDIR = Join-Path $PWD 'runtime\matplotlib'
 ## Workflows connected to the engine
 
 - **Ringkasan:** weighted P/A/U durations, coverage/utilization, workstation comparisons, committed event sequence, and checkpoint tables.
-- **Pemantauan Live:** start and stop the synthetic replay through the API, see processed-frame progress, and read the latest stored observations. A visible notice states that live CCTV capture and video preview are unavailable.
+- **Pemantauan Live:** preview the local webcam; separately start and stop synthetic replay through the API, see processed-frame progress, and read the latest stored observations. Webcam preview and replay observations have separate labels.
 - **Workstation:** read configured polygons/revisions, inspect a polygon, add employee registry entries, and create bounded manual assignments. These writes persist in SQLite and survive browser/server restarts. Assignment never supplies an observed employee identity.
 - **Analitik:** select a stored run, workstation, or UTC range; inspect the timeline and individual committed intervals. Gaps are materialized as UNKNOWN. An unknown reason is split when the evidence reason changes so reconfirmation does not rewrite a previous camera-offline reason.
 - **Laporan:** server-filtered workstation results, sorting/pagination/search, and a real CSV response from the same report query. Table-only search is labeled separately from server/export filters.
-- **Kamera:** read actual camera configuration records from SQLite. No fake connection-test or live-stream controls are displayed.
+- **Kamera:** select/start/stop a browser webcam and read actual camera configuration records from SQLite in a separate section. Preview shows delivered frames and actual dimensions/FPS; RTSP capture and a preview connection test are available in the live engine panel.
 - **Pengaturan:** inspect runtime capabilities and connectivity, refresh the connection, and export the active report. Shift calendars, retention, backup/restore settings are not presented as working mutations.
 
 The default query follows the latest run. A pinned historical run does not change automatically. Filtering supports explicit start/end timestamps in UTC; observation display uses the engine's timezone. Report durations are presented with seconds so the 17-second pilot remains readable. Ratios use the sum of duration denominators across workstations. Multiple occupants do not multiply desk occupancy duration.
@@ -51,7 +55,7 @@ The replay button uses the packaged synthetic detection fixture. Python executes
 
 Synthetic replay is refused if the selected database already contains a different data source. Use a separate pilot database to avoid mixing generated observations with a supplied video or production source. The launcher and bare `dashboard` command default to a separate pilot database. Other existing databases can be viewed by choosing them explicitly, but their non-synthetic histories cannot be modified by the synthetic replay button.
 
-Labels distinguish a reachable API from an online CCTV device. The latest workstation state is explicitly a replay snapshot; it is not claimed to describe the current room. There is no illustrated camera frame in engine mode. Real RTSP capture, multi-camera workers, model accuracy, GPU performance, calendar/DST aggregation, full production API/GUI, and validated backup/restore remain later gates. No face recognition or biometric storage is added.
+Labels distinguish a reachable API from a browser webcam and an online CCTV device. The latest workstation state is explicitly a replay snapshot; it is not claimed to describe the current room or webcam. There is no illustrated camera frame in engine mode. Simultaneous multi-camera workers, model accuracy, GPU performance, calendar/DST aggregation, full production API/GUI, and validated backup/restore remain later gates. No face recognition or biometric storage is added.
 
 ## Local session and API
 

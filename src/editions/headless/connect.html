@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CCTV Headless · Koneksi</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,sans-serif;background:#0d1420;color:#e8eef8}body{max-width:1000px;margin:40px auto;padding:0 20px}h1{font-size:30px;margin-bottom:8px}h2{font-size:20px}p{color:#b4c1d5;line-height:1.6}.tag{color:#7dd3fc;font-size:13px;letter-spacing:1px}section{background:#162132;border:1px solid #304057;padding:24px;border-radius:14px;margin:20px 0}label{display:block;margin:14px 0 6px}input,select,textarea,button{box-sizing:border-box;font:inherit;border-radius:8px;padding:11px;border:1px solid #53667e}input,select,textarea{width:100%;background:#0d1420;color:#e8eef8}button{background:#89d4fa;color:#0d1420;font-weight:650;cursor:pointer;margin:12px 8px 0 0}button.secondary{background:transparent;color:#e8eef8}button:disabled{opacity:.5;cursor:wait}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#0d1420;padding:16px;border-radius:8px;max-height:350px;overflow:auto}code{overflow-wrap:anywhere}.hidden{display:none}.notice{padding:12px;background:#23344b;border-radius:8px}#message{min-height:26px;color:#a9e4ff}.row{display:flex;gap:16px}.row>*{flex:1}small{color:#b4c1d5}a{color:#89d4fa}@media(max-width:650px){.row{display:block}body{margin:24px auto}section{padding:18px}}
+</style></head><body>
+<div class="tag">CCTV HEADLESS ENGINE</div><h1>Hubungkan aplikasi ke engine AI</h1>
+<p>Server sudah merespons. Gunakan halaman ini untuk mengecek koneksi dan mencoba API. Engine tetap berjalan saat halaman ditutup.</p>
+<section><h2>1. Hubungkan dengan token</h2><p>Token diberikan oleh administrator saat pemasangan. Pilih file <code>token.txt</code> atau tempel token di bawah. Token hanya disimpan di memori tab ini.</p>
+<label for="tokenFile">Pilih file token</label><input id="tokenFile" type="file" accept=".txt,text/plain">
+<form id="connect"><label for="token">Token API</label><input id="token" type="password" autocomplete="off" spellcheck="false" required placeholder="Tempel token dari administrator">
+<button type="submit">Hubungkan &amp; cek status</button><button id="disconnect" class="secondary" type="button">Hapus token</button></form>
+<div id="message" role="status" aria-live="polite">Belum terautentikasi.</div></section>
+<div id="connected" class="hidden">
+<section><h2>2. Status engine</h2><p id="summary"></p><p>Alamat integrasi: <code id="base"></code><br>Autentikasi: <code>Authorization: Bearer &lt;token&gt;</code></p><button id="refresh" class="secondary">Perbarui status</button><pre id="status"></pre></section>
+<section><h2>3. Tambahkan kamera</h2><p>Masukkan URL RTSP dari kamera atau NVR. Registrasi belum memulai analisis. Simpan konfigurasi kamera di server jika perlu tersedia otomatis setelah restart.</p>
+<form id="cameraForm"><div class="row"><div><label for="cameraId">ID kamera</label><input id="cameraId" required pattern="[a-z][a-z0-9_-]{0,39}" placeholder="lobby"></div><div><label for="cameraUrl">URL RTSP</label><input id="cameraUrl" type="password" required autocomplete="off" placeholder="rtsp://user:password@kamera/stream"></div></div><button>Daftarkan kamera</button></form>
+<p>Untuk uji deteksi: pilih endpoint <code>POST /cameras/{camera_id}/start</code> di bawah dan gunakan <code>?preview_only=true</code>. Untuk pencatatan zona, simpan kalibrasi melalui endpoint <code>PUT .../analytics</code> terlebih dahulu.</p></section>
+<section><h2>4. Coba API</h2><p>Pilih endpoint, isi parameter pada alamat dan body JSON bila diperlukan, lalu kirim. Operasi POST, PUT, dan DELETE mengubah state engine.</p>
+<label for="endpoint">Endpoint</label><select id="endpoint"></select><p id="description"></p>
+<label for="path">Alamat request (relatif terhadap server ini)</label><input id="path" spellcheck="false">
+<label for="body">Body JSON (kosongkan jika tidak diperlukan)</label><textarea id="body" rows="8" spellcheck="false"></textarea>
+<button id="send">Kirim request</button><button id="download" class="secondary">Unduh OpenAPI</button><pre id="result" aria-live="polite">Hasil request akan tampil di sini.</pre>
+<p>WebSocket: <code>/api/v1/stream</code> dengan header Bearer dari client integrasi. Webhook diatur oleh administrator melalui konfigurasi server.</p></section>
+</div><p><small>Belum punya token atau lisensi? Minta paket konfigurasi kepada administrator. Jangan mengirim token melalui URL atau membagikan file token ke publik.</small></p>
+<script>
+const $=id=>document.getElementById(id);let token='',schema=null,operations=[];
+function message(text){$('message').textContent=text;}
+async function api(path,method='GET',body){
+ if(!path.startsWith('/api/v1/')||path.includes('://')||path.includes('\\')||path.includes('#'))throw Error('Gunakan alamat /api/v1/... pada server ini.');
+ const response=await fetch(path,{method,headers:{Authorization:'Bearer '+token,...(body!==undefined?{'Content-Type':'application/json'}:{})},body:body===undefined?undefined:JSON.stringify(body),cache:'no-store',redirect:'error'});
+ const value=response.status===204?null:await response.json();
+ if(!response.ok){if(response.status===401)throw Error('Token tidak cocok. Pilih token.txt dari instalasi ini atau minta token ke administrator.');if(response.status===403)throw Error('Lisensi kedaluwarsa. Hubungi administrator.');throw Error('HTTP '+response.status+' — '+JSON.stringify(value));}return value;
+}
+async function refresh(){const value=await api('/api/v1/status');$('status').textContent=JSON.stringify(value,null,2);$('summary').textContent='Terhubung • '+value.cameras.length+' kamera terdaftar • batas lisensi '+value.max_cameras+' kamera';}
+function example(node,depth=0){if(!node||depth>6)return null;if(node.$ref)return example(schema.components.schemas[node.$ref.split('/').pop()],depth+1);if(node.default!==undefined)return node.default;if(node.enum)return node.enum[0];if(node.anyOf)return example(node.anyOf[0],depth+1);if(node.type==='object'){const value={};for(const [key,item]of Object.entries(node.properties||{}))value[key]=example(item,depth+1);return value;}if(node.type==='array')return [];if(node.type==='integer'||node.type==='number')return node.minimum||1;if(node.type==='boolean')return false;return '';}
+function select(){const op=operations[Number($('endpoint').value)];$('path').value=op.path;$('description').textContent=op.spec.summary||'';const body=op.spec.requestBody?.content?.['application/json']?.schema;$('body').value=body?JSON.stringify(example(body),null,2):'';}
+async function connect(){token=$('token').value.trim();if(!token)throw Error('Pilih file token atau tempel token terlebih dahulu.');await refresh();schema=await api('/api/v1/openapi.json');operations=[];$('endpoint').replaceChildren();for(const[path,methods]of Object.entries(schema.paths))for(const[method,spec]of Object.entries(methods)){if(!['get','post','put','delete','patch'].includes(method))continue;const option=document.createElement('option');option.value=operations.length;option.textContent=method.toUpperCase()+' '+path;operations.push({path,method:method.toUpperCase(),spec});$('endpoint').append(option);}select();$('base').textContent=location.origin+'/api/v1';$('connected').classList.remove('hidden');message('Autentikasi berhasil. Kamu bisa mencoba API di bawah.');}
+async function action(fn){try{await fn();}catch(error){message(error.message);}}
+$('connect').onsubmit=e=>{e.preventDefault();action(connect);};
+$('tokenFile').onchange=()=>action(async()=>{const file=$('tokenFile').files[0];if(!file)return;if(file.size>4096)throw Error('File token terlalu besar. Pilih token.txt.');$('token').value=(await file.text()).trim();await connect();});
+$('disconnect').onclick=()=>{token='';schema=null;operations=[];$('token').value='';$('tokenFile').value='';$('status').textContent='';$('result').textContent='';$('cameraUrl').value='';$('body').value='';$('connected').classList.add('hidden');message('Token dihapus dari tab ini. Engine tetap berjalan.');};
+$('refresh').onclick=()=>action(refresh);$('endpoint').onchange=select;
+$('cameraForm').onsubmit=e=>{e.preventDefault();action(async()=>{const result=await api('/api/v1/cameras','POST',{camera_id:$('cameraId').value.trim(),url:$('cameraUrl').value.trim()});$('cameraUrl').value='';$('result').textContent=JSON.stringify(result,null,2);await refresh();message('Kamera terdaftar. Gunakan camera_key pada hasil untuk kalibrasi.');});};
+$('send').onclick=()=>action(async()=>{const op=operations[Number($('endpoint').value)];if(/[{}]/.test($('path').value))throw Error('Ganti parameter seperti {camera_id} dengan ID kamera kamu.');const body=$('body').value.trim();$('send').disabled=true;try{const value=await api($('path').value,op.method,body?JSON.parse(body):undefined);$('result').textContent=value===null?'Berhasil (204)':JSON.stringify(value,null,2);message('Request berhasil.');}finally{$('send').disabled=false;}});
+$('download').onclick=()=>{const url=URL.createObjectURL(new Blob([JSON.stringify(schema,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='cctv-headless-openapi.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};
+</script></body></html>

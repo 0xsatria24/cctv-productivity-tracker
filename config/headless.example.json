@@ -1,0 +1,7 @@
+{
+  "detector": "yolox",
+  "device": "CPU",
+  "model_path": "models/webcam-yolox.onnx",
+  "port": 8766,
+  "cameras": []
+}

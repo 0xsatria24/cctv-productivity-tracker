@@ -1,6 +1,8 @@
 # CCTV Productivity Tracker — Design Workspace
 
-Status: dashboard React sudah terhubung ke engine Python melalui API lokal dan SQLite. Satu server menyajikan UI dan API; replay dapat dimulai/dihentikan dari dashboard. Capture RTSP, native GUI, dan acceptance produksi belum selesai.
+Edisi tambahan **CCTV Headless Engine** tersedia tanpa frontend, dengan API multi-kamera, WebSocket, webhook, dan lisensi offline bertanda tangan. Panduan instalasi, konfigurasi, kontrak API, serta batas validasi: [Headless Engine](docs/runtime/HEADLESS.md). Jalankan `python -m editions.headless --help`; paket Enterprise dan Headless dibuat terpisah dengan `python scripts/build_editions.py`. Kedua edisi menggunakan engine yang sama.
+
+Status: dashboard React sudah terhubung ke engine Python melalui API lokal dan SQLite. Satu server menyajikan UI dan API; replay dapat dimulai/dihentikan dari dashboard. Preview beberapa kamera tersedia dalam grid 1/4/9/16. Tracking, zona dan durasi live masih satu sumber aktif; native GUI, inferensi banyak kamera dan acceptance produksi belum selesai.
 
 Jalankan aplikasi terintegrasi di PowerShell dari folder proyek:
 
@@ -10,9 +12,13 @@ Jalankan aplikasi terintegrasi di PowerShell dari folder proyek:
 
 Buka `http://127.0.0.1:8765/` di Chrome/Edge. Script membangun frontend, lalu menjalankan engine/API pada loopback. Database pilot default berada di local app data di luar OneDrive. Panduan dan batasannya: [Dashboard integration](docs/runtime/DASHBOARD-INTEGRATION.md).
 
+Untuk uji webcam, buka halaman **Kamera**, pilih perangkat, klik **Mulai webcam**, dan izinkan akses kamera di browser. Webcam memakai deteksi orang YOLOX-S melalui OpenVINO lokal dengan bounding box dan jumlah orang; kalibrasi zona dan Mulai pencatatan live mengaktifkan laporan durasi dari kamera asli. Pilih Kamera live sebagai sumber laporan. Jalankan `.\.venv\Scripts\python.exe scripts/setup_webcam_model.py` sekali untuk memasang model. Lihat [setup OpenVINO](docs/runtime/OPENVINO-YOLOX.md) dan [panduan engine live](docs/runtime/LIVE-ENGINE.md).
+
 Stack V1: Python, PySide6/PyQtGraph, PyAV/FFmpeg, OpenCV/NumPy, ONNX Runtime, SQLite, FastAPI/Uvicorn lokal.
 
-Panduan runtime Python dan demo yang sudah diuji: [Runtime pilot](docs/runtime/README.md). Demo memakai input sintetis berlabel jelas; setiap invocation menghasilkan database baru. UI React masih prototipe terpisah dengan mock data.
+Halaman **Kamera** dan **Pemantauan Live** memakai grid CCTV dengan daftar/pencarian kamera, fokus, fullscreen dan preview RTSP independen. Pengaturan webcam dibuka dari ikon pengaturan pada tile. Aktifkan **Deteksi** untuk menampilkan bounding box. Tambahan kamera RTSP berlabel **Preview saja**; koneksinya tersedia selama proses aplikasi berjalan. Lihat [panduan camera wall](docs/runtime/CAMERA-WALL.md).
+
+Panduan runtime Python dan demo yang sudah diuji: [Runtime pilot](docs/runtime/README.md). Demo memakai input sintetis berlabel jelas; setiap invocation menghasilkan database baru. Mode Vite menyediakan prototipe mock terpisah; mode dashboard Python memakai data engine dan mendukung preview webcam lokal.
 
 ```powershell
 Set-Location -LiteralPath 'C:\Users\muham\OneDrive\Documents\ChatGPT\cctv 2'

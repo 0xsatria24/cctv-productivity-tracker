@@ -19,10 +19,10 @@ def test_migration_is_repeatable_and_resources_unchanged(tmp_path):
     path = tmp_path / "tracker.sqlite3"
     for _ in range(2):
         with closing(Database(path)) as db:
-            assert db.conn.execute("PRAGMA user_version").fetchone()[0] == 2
+            assert db.conn.execute("PRAGMA user_version").fetchone()[0] == 3
             assert db.conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
             assert db.conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
-            assert db.conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0] == 2
+            assert db.conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0] == 3
             assert db.conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
 
 
@@ -39,6 +39,37 @@ def test_newer_schema_and_unversioned_database_refused(tmp_path):
     conn.close()
     with pytest.raises(ValueError, match="unversioned"):
         Database(other)
+
+
+def test_upgrade_v2_preserves_existing_data_and_checksums(tmp_path):
+    path = tmp_path / 'upgrade.sqlite3'
+    with closing(Database(path)) as db:
+        employee = db.add_employee('Migration fixture')
+        with db.transaction() as conn:
+            # Recreate an existing v2 database using only this disposable fixture.
+            conn.execute('DROP TABLE live_calibrations')
+            conn.execute('DELETE FROM runtime_migration_checksums WHERE version=3')
+            conn.execute('DELETE FROM schema_migrations WHERE version=3')
+            conn.execute('PRAGMA user_version=2')
+    with closing(Database(path)) as db:
+        assert db.conn.execute('PRAGMA user_version').fetchone()[0] == 3
+        assert db.conn.execute('SELECT display_name FROM employees WHERE id=?', (employee,)).fetchone()[0] == 'Migration fixture'
+        assert db.conn.execute('SELECT COUNT(*) FROM runtime_migration_checksums').fetchone()[0] == 3
+
+
+def test_same_model_weights_retain_different_execution_runtime_per_run(tmp_path):
+    import json
+    config = settings(tmp_path / 'runtime-provenance.sqlite3')
+    with closing(Database(config.database)) as db:
+        first = db.begin_run(config, source='WEBCAM_LIVE', model_sha='a' * 64, model_manifest={'provider': 'CPUExecutionProvider'}, start=1_000_000)
+        first.finish(1_000_000, 'STOPPED')
+        second = db.begin_run(config, source='WEBCAM_LIVE', model_sha='a' * 64, model_manifest={'provider': 'OpenVINO', 'execution_devices': ['GPU.0'], 'precision': 'f32'}, start=2_000_000)
+        second.finish(2_000_000, 'STOPPED')
+        rows = [json.loads(r[0]) for r in db.conn.execute('SELECT runtime_manifest_json FROM engine_runs ORDER BY started_utc_us')]
+        assert rows[0]['inference_runtime']['provider'] == 'CPUExecutionProvider'
+        assert rows[1]['inference_runtime']['provider'] == 'OpenVINO'
+        assert rows[1]['inference_runtime']['execution_devices'] == ['GPU.0']
+        assert db.conn.execute('SELECT COUNT(*) FROM model_artifacts').fetchone()[0] == 1
 
 
 def test_replay_sqlite_golden_totals_and_atomic_durability(tmp_path):

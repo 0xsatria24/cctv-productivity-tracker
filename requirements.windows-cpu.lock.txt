@@ -1,6 +1,7 @@
 annotated-types==0.8.0
 anyio==4.15.1
 av==16.0.1
+-e git+https://github.com/0xsatria24/cctv-productivity-tracker.git@5e1933753ffecf390f2c60563fa2c7ea5515408b#egg=cctv_tracker
 certifi==2026.7.22
 charset-normalizer==3.5.2
 click==8.5.0
@@ -26,6 +27,8 @@ numpy==2.2.6
 onnx==1.19.0
 onnxruntime==1.23.2
 opencv-python==4.12.0.88
+openvino==2026.4.1
+openvino-telemetry==2025.2.0
 packaging==26.3
 pillow==12.3.0
 pluggy==1.6.0

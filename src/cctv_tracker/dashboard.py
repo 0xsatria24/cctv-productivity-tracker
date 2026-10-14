@@ -106,6 +106,8 @@ def snapshot(db, controller=None, timezone="Asia/Jakarta"):
         item["frame_seq"] = payload.get("frame_seq")
         item["generation_id"] = payload.get("generation_id")
         item["zone_states"] = {alias: values[-1]["state"] for alias, values in payload.get("zones", {}).items() if values}
+        if payload.get('zone_id'):
+            item['zone_states'][payload['zone_id']] = payload['state']
         events.append(item)
     return {"mode": "integrated_replay_pilot" if controller else "read_only_pilot", "schema_version": conn.execute("PRAGMA user_version").fetchone()[0],
             "identity_source": "anonymous", "face_recognition_enabled": False, "live_capture_available": False, "timezone": timezone,

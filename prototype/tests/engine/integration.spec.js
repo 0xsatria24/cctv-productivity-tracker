@@ -1,14 +1,28 @@
 import { test, expect } from '@playwright/test';
 
+async function expectPaginatedRow(page, testId, text) {
+  const table = page.getByTestId(testId);
+  // Retained SQLite data can place the newly created row beyond the first page.
+  await expect.poll(async () => {
+    const previous = table.getByRole('button', { name: 'Halaman sebelumnya', exact: true });
+    while (await previous.isEnabled()) await previous.click();
+    const next = table.getByRole('button', { name: 'Halaman berikutnya', exact: true });
+    while (!(await table.textContent()).includes(text) && await next.isEnabled()) await next.click();
+    return (await table.textContent()).includes(text);
+  }).toBe(true);
+}
+
 test('dashboard calls Python, shows committed golden metrics, filters, timeline and downloads real CSV',async({page})=>{
+  // Durable Windows/OneDrive writes can exceed the default browser-test deadline.
+  test.setTimeout(150000);
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.goto('/');
-  await expect(page.getByText('ENGINE TERINTEGRASI',{exact:true})).toBeVisible();
+  await expect(page.getByText('REPLAY SIMULASI',{exact:true})).toBeVisible();
   await expect(page.getByTestId('engine-connection')).toContainText('terhubung');
   const start=page.waitForResponse(r=>r.url().endsWith('/pilot/v1/replay')&&r.request().method()==='POST');
   await page.getByRole('button',{name:'Jalankan replay',exact:true}).click();
   expect((await start).status()).toBe(202);
-  await expect(page.getByText('Status:',{exact:false}).filter({hasText:'COMPLETED'})).toBeVisible({timeout:30000});
+  await expect(page.getByText('Status:',{exact:false}).filter({hasText:'COMPLETED'})).toBeVisible({timeout:120000});
   await page.getByRole('button',{name:'Ringkasan',exact:true}).click();
   await expect(page.getByTestId('engine-metrics')).toContainText('4 dtk');
   await page.getByRole('button',{name:'Laporan',exact:true}).click();
@@ -38,7 +52,7 @@ test('employee and assignment forms persist through API and reload without claim
   await page.getByRole('button',{name:'Tambah karyawan',exact:true}).click();
   await page.getByLabel('Nama karyawan',{exact:true}).fill(employeeName);
   await page.getByRole('button',{name:'Simpan ke engine',exact:true}).click();
-  await expect(page.getByTestId('engine-employees')).toContainText(employeeName);
+  await expectPaginatedRow(page, 'engine-employees', employeeName);
   await page.getByRole('button',{name:'Tambah assignment',exact:true}).click();
   await page.getByLabel('Karyawan',{exact:true}).selectOption({label:employeeName});
   // Distinct future interval avoids conflicts with retained runs from previous test executions.
@@ -48,9 +62,9 @@ test('employee and assignment forms persist through API and reload without claim
   await page.getByLabel('Mulai assignment (UTC)',{exact:true}).fill(start);
   await page.getByLabel('Sampai assignment (UTC)',{exact:true}).fill(end);
   await page.getByRole('button',{name:'Simpan ke engine',exact:true}).click();
-  await expect(page.getByTestId('engine-assignments')).toContainText(employeeName);
+  await expectPaginatedRow(page, 'engine-assignments', employeeName);
   await page.reload();
-  await expect(page.getByTestId('engine-employees')).toContainText(employeeName);
+  await expectPaginatedRow(page, 'engine-employees', employeeName);
   const report=await page.request.get('/pilot/v1/reports');
   const data=await report.json();expect(data.workstations.every(r=>r.observed_employee_id===null&&r.assignment_is_observed_identity===false)).toBe(true);
   await page.getByRole('button',{name:'Lihat polygon',exact:true}).first().click();

@@ -51,8 +51,10 @@ def main(argv=None):
     assignment.add_argument("--end", required=True, help="Explicit assignment expiry; never interpreted as observed identity")
     serve = commands.add_parser("serve-pilot", help="Authenticated, read-only loopback API")
     serve.add_argument("--port", type=int, default=8765)
-    dashboard = commands.add_parser("dashboard", help="Run the integrated React dashboard and Python replay engine")
+    dashboard = commands.add_parser("dashboard", help="Run the integrated React dashboard with live webcam/RTSP accounting and isolated replay")
     dashboard.add_argument("--port", type=int, default=8765)
+    dashboard.add_argument('--detector', choices=['nanodet', 'yolox', 'yolox-openvino'], default='yolox-openvino', help='YOLOX OpenVINO: optimized quality mode; yolox: ONNX baseline; nanodet: lightweight')
+    dashboard.add_argument('--openvino-device', choices=['CPU', 'GPU'], default='GPU', help='Explicit OpenVINO device; no silent fallback')
     dashboard.add_argument("--ui-dir", type=Path, default=Path(__file__).resolve().parents[2] / "prototype" / "dist")
     args = parser.parse_args(argv)
     logger = configure_logging(args.log_dir or app_data() / "logs")
@@ -76,7 +78,7 @@ def main(argv=None):
             return
         if args.command == "doctor":
             packages = {}
-            for name in ("cctv-tracker", "av", "onnxruntime", "supervision", "numpy", "opencv-python", "fastapi", "uvicorn"):
+            for name in ("cctv-tracker", "av", "onnxruntime", "supervision", "numpy", "opencv-python", "fastapi", "uvicorn", "openvino"):
                 try:
                     packages[name] = importlib.metadata.version(name)
                 except importlib.metadata.PackageNotFoundError:
@@ -86,7 +88,12 @@ def main(argv=None):
                 providers = onnxruntime.get_available_providers()
             except ImportError:
                 providers = []
-            emit({"python": sys.version.split()[0], "packages": packages, "sqlite": sqlite3.sqlite_version,
+            try:
+                import openvino as ov
+                openvino_devices = ov.Core().available_devices
+            except (ImportError, RuntimeError):
+                openvino_devices = []
+            emit({"python": sys.version.split()[0], "packages": packages, "sqlite": sqlite3.sqlite_version, "openvino_devices": openvino_devices,
                   "providers": providers, "identity_source": "anonymous", "face_recognition_enabled": False})
             return
         with closing(Database(settings.database)) as database:
@@ -117,8 +124,10 @@ def main(argv=None):
                     settings = replace(load_settings(Path(str(files("cctv_tracker").joinpath("resources", "pilot.example.json")))), database=settings.database)
                 controller = ReplayController(settings)
                 token = secrets.token_urlsafe(32)
-                app = create_app(settings.database, token, controller=controller, ui_dir=args.ui_dir, timezone=settings.timezone)
-                print(f"Dashboard: http://127.0.0.1:{args.port}/\nInput: synthetic replay. Database: {settings.database}", flush=True)
+                app = create_app(settings.database, token, controller=controller, ui_dir=args.ui_dir, timezone=settings.timezone, detector_kind=args.detector, openvino_device=args.openvino_device)
+                if args.detector == 'yolox-openvino':
+                    print(f'Loading YOLOX-S OpenVINO {args.openvino_device}; first GPU kernel compilation may take longer, then cached.', flush=True)
+                print(f"Dashboard: http://127.0.0.1:{args.port}/\nSources: live webcam / RTSP and isolated synthetic replay. Replay database: {settings.database}", flush=True)
             else:
                 app = create_app(settings.database, os.environ.get("CCTV_LOCAL_TOKEN", ""))
             uvicorn.run(app, host="127.0.0.1", port=args.port, workers=1, access_log=False)

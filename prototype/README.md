@@ -1,5 +1,9 @@
 # CCTV Workspace: interactive design prototype
 
+Integrated camera view update, 14 October 2026: multiple independent previews, 1/4/9/16 layouts, focus, fullscreen, search and per-camera state. Additional RTSP previews are explicitly separate from the single-source accounting engine. See [camera wall](../docs/runtime/CAMERA-WALL.md). This update applies to Python-served engine mode on port 8765; the standalone Vite mock prototype remains a separate mode.
+
+Update 13 October 2026: the integrated dashboard supports webcam person detection through the local Python engine, with capture persisting across routes. See [webcam setup](../docs/runtime/WEBCAM.md). Update 14 October: live zone calibration, tracking, RTSP and SQLite occupancy reports are implemented. See [live engine workflow](../docs/runtime/LIVE-ENGINE.md).
+
 Update 12 October 2026: this frontend also includes an integrated Python-engine pilot. Run `run-app.ps1` from the repository root and open `http://127.0.0.1:8765/`. The Python server issues a local session and serves the built frontend with engine mode enabled. See [Dashboard integration](../docs/runtime/DASHBOARD-INTEGRATION.md). `npm run dev` on port 5173 remains the independent mock design prototype; it does not silently substitute for an unavailable engine.
 
 React + Vite, browser-only. Built on 12 October 2026 from the existing [PRD](../PRD-CCTV-Productivity-Tracker.md), [UI/UX specification](../UI_UX_SPEC.md), and [design system](../DESIGN_SYSTEM.md). The prototype imports the shared [design tokens](../docs/ui/design-tokens.json) without changing them.

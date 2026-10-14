@@ -2,7 +2,11 @@ param(
     [ValidateRange(1, 65535)]
     [int]$Port = 8765,
     [string]$DatabasePath = '',
-    [switch]$SkipBuild
+    [switch]$SkipBuild,
+    [ValidateSet('nanodet','yolox','yolox-openvino')]
+    [string]$Detector = 'yolox-openvino',
+    [ValidateSet('CPU','GPU')]
+    [string]$OpenVinoDevice = 'GPU'
 )
 $ErrorActionPreference = 'Stop'
 $workspacePath = $PSScriptRoot
@@ -24,5 +28,5 @@ if (-not $SkipBuild) {
 }
 Set-Location -LiteralPath $workspacePath
 $env:MPLCONFIGDIR = Join-Path (Split-Path -Parent $DatabasePath) 'matplotlib'
-& $pythonExecutable -m cctv_tracker --database $DatabasePath dashboard --port $Port
+& $pythonExecutable -m cctv_tracker --database $DatabasePath dashboard --port $Port --detector $Detector --openvino-device $OpenVinoDevice
 exit $LASTEXITCODE

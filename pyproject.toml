@@ -12,16 +12,20 @@ dependencies = ["tzdata==2025.2"]
 [project.optional-dependencies]
 vision = ["numpy==2.2.6", "av==16.0.1", "onnxruntime==1.23.2", "opencv-python==4.12.0.88", "supervision==0.26.1"]
 api = ["fastapi==0.115.12", "uvicorn==0.34.3"]
+headless = ["fastapi==0.115.12", "uvicorn==0.34.3", "websockets==15.0.1", "httpx==0.28.1", "cryptography==46.0.3"]
+openvino = ["openvino==2026.4.1", "openvino-telemetry==2025.2.0"]
 test = ["pytest==8.4.2", "onnx==1.19.0", "httpx==0.28.1"]
 
 [project.scripts]
 cctv-tracker = "cctv_tracker.cli:main"
+cctv-headless = "editions.headless.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
 cctv_tracker = ["resources/*.sql", "resources/*.json"]
+"editions.headless" = ["*.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -17,19 +17,21 @@ export function queryString(filters,runId) {
 }
 
 export function useEngine() {
+  const [dataset, updateDataset] = useState('replay');
   const [snapshot,setSnapshot]=useState(null),[connectionError,setConnectionError]=useState(''),[report,setReport]=useState(null),[reportError,setReportError]=useState('');
   const [selection,setSelection]=useState('LATEST'),[filters,setFilters]=useState({workspace:'ALL',start:null,end:null}),[refresh,setRefresh]=useState(0),[loading,setLoading]=useState(true),[notice,setNotice]=useState('');
   const [mutating,setMutating]=useState(false),[receivedAt,setReceivedAt]=useState(null);
   const mounted=useRef(true),noticeTimer=useRef();
   const reload=useCallback(()=>setRefresh(v=>v+1),[]);
+  const setDataset=useCallback(value=>{updateDataset(value);setSnapshot(null);setReport(null);setReportError('');setLoading(true);setSelection('LATEST');setFilters({workspace:'ALL',start:null,end:null});},[]);
   useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;clearTimeout(noticeTimer.current);};},[]);
   useEffect(()=>{
     const controller=new AbortController();let timer;
-    async function poll(){try{const value=await engineRequest('status',{signal:controller.signal});if(!controller.signal.aborted){setSnapshot(value);setConnectionError('');setReceivedAt(Date.now());}}catch(error){if(error.name!=='AbortError')setConnectionError(error.message||'Engine tidak dapat dijangkau.');}finally{if(!controller.signal.aborted){setLoading(false);timer=setTimeout(poll,1000);}}}
+    async function poll(){try{const value=await engineRequest(dataset==='live'?'status?dataset=live':'status',{signal:controller.signal});if(!controller.signal.aborted){setSnapshot(value);setConnectionError('');setReceivedAt(Date.now());}}catch(error){if(error.name!=='AbortError')setConnectionError(error.message||'Engine tidak dapat dijangkau.');}finally{if(!controller.signal.aborted){setLoading(false);timer=setTimeout(poll,1000);}}}
     poll();return()=>{controller.abort();clearTimeout(timer);};
-  },[refresh]);
+  },[refresh,dataset]);
   const runId=selection==='LATEST'?snapshot?.runs[0]?.id:selection==='ALL'?null:selection;
-  const query=queryString(filters,runId);
+  const query=queryString(filters,runId)+(dataset==='live'?'&dataset=live':'');
   useEffect(()=>{
     if(!snapshot)return;
     const controller=new AbortController();
@@ -38,7 +40,7 @@ export function useEngine() {
   },[snapshot?.committed_event_seq,query,refresh]);
   async function action(path,body){
     setMutating(true);
-    try{const result=await engineRequest(path,{method:'POST',...(body?{body:JSON.stringify(body)}:{})});reload();return result;}
+    try{const result=await engineRequest(path+(dataset==='live'&&['employees','assignments'].includes(path)?'?dataset=live':''),{method:'POST',...(body?{body:JSON.stringify(body)}:{})});if(path==='replay')setDataset('replay');reload();return result;}
     catch(error){toast(error.message);throw error;}
     finally{if(mounted.current)setMutating(false);}
   }
@@ -46,7 +48,7 @@ export function useEngine() {
   async function exportCsv(){
     try{const response=await fetch(`/pilot/v1/export.csv?${query}`,{credentials:'same-origin',cache:'no-store'});if(!response.ok)throw new Error('Ekspor gagal. Periksa koneksi dan rentang laporan.');const url=URL.createObjectURL(await response.blob());const anchor=document.createElement('a');anchor.href=url;anchor.download='cctv-engine-report.csv';anchor.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('CSV dari database engine diunduh.');}catch(error){toast(error.message);}
   }
-  return {snapshot,connectionError,report,reportError,selection,setSelection,runId,filters,setFilters,loading,reload,action,exportCsv,mutating,notice,toast,receivedAt};
+  return {dataset,setDataset,snapshot,connectionError,report,reportError,selection,setSelection,runId,filters,setFilters,loading,reload,action,exportCsv,mutating,notice,toast,receivedAt};
 }
 
 export function seconds(microseconds){if(microseconds==null)return 'N/A';const value=microseconds/1e6;if(value<60)return `${new Intl.NumberFormat('id-ID',{maximumFractionDigits:1}).format(value)} dtk`;const hours=Math.floor(value/3600),minutes=Math.floor((value%3600)/60),rest=Math.floor(value%60);return `${hours?`${hours}j `:''}${minutes}m ${rest}d`;}

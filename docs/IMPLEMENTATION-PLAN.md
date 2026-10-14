@@ -2,6 +2,10 @@
 
 Versi: 1.0 · 11 Oktober 2026. Ini urutan implementasi dan gate, bukan estimasi tanggal rilis.
 
+## Runtime progress, 14 October 2026
+
+The single-camera pilot now connects webcam/RTSP capture, actual YOLOX inference, ByteTrack, calibrated polygons, confirmed intervals/events, SQLite and React live reports. This implements a testable slice of M5-M8 and the web dashboard path. It does not close the full milestones: target-scene accuracy, supervisor recovery, multi-camera benchmarks, production API/GUI, schedules, backup/restore and packaging still require their acceptance gates. Details and evidence: [LIVE-ENGINE.md](runtime/LIVE-ENGINE.md).
+
 ## 1. Milestones
 
 | ID | Output | Gate sebelum lanjut |
