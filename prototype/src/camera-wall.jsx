@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Camera, ChevronLeft, ChevronRight, ListVideo, Maximize, Plus, Search, Trash2, X } from 'lucide-react';
 import { Button, Field, Modal, Status } from './components';
-import { engineRequest } from './engine-client';
+import { engineRequest, durationClock } from './engine-client';
 import { WebcamPanel } from './webcam';
 import './camera-wall.css';
 
@@ -51,8 +51,21 @@ function useCameraRegistry(visibleIds) {
   return { cameras, error, add, remove };
 }
 
-function RtspTile({ camera, visible, onFocus }) {
-  const [frame, setFrame] = useState(null), [size, setSize] = useState(null);
+function RtspTile({ camera, visible, onFocus, latest, zones = [], showDetections, showZones }) {
+  const [frame, setFrame] = useState(null), [size, setSize] = useState(null), [dimensions, setDimensions] = useState(null), [bounds, setBounds] = useState(null);
+  const frameArea = useRef(null);
+  useEffect(() => {
+    if (!dimensions || !frameArea.current || !visible) { setBounds(null); return; }
+    const area = frameArea.current;
+    const measure = () => {
+      const scale = Math.min(area.clientWidth / dimensions.width, area.clientHeight / dimensions.height);
+      const width = dimensions.width * scale, height = dimensions.height * scale;
+      setBounds({ left: (area.clientWidth - width) / 2, top: (area.clientHeight - height) / 2, width, height });
+    };
+    const observer = new ResizeObserver(measure);
+    observer.observe(area); measure();
+    return () => observer.disconnect();
+  }, [dimensions, visible]);
   useEffect(() => {
     setFrame(null); setSize(null);
     if (!visible) return;
@@ -82,13 +95,33 @@ function RtspTile({ camera, visible, onFocus }) {
     return () => { cancelled = true; abort.abort(); clearTimeout(timer); clearInterval(stale); if (object) URL.revokeObjectURL(object); };
   }, [camera.id, camera.source, visible]);
   const health = frame && camera.health === 'ONLINE' ? 'ONLINE' : camera.health === 'ONLINE' ? 'CONNECTING' : camera.health;
+  const detection = frame && visible && camera.analysis && health === 'ONLINE' ? latest : null;
   return <section className="rtsp-wall-panel">
     <header className="camera-tile-heading"><h2>{camera.name}</h2><Status value={health === 'PAUSED' ? 'DISABLED' : health === 'STALLED' ? 'DEGRADED' : health} label={HEALTH[health] || health}/><Button icon={Maximize} aria-label={`Fokus ${camera.name}`} onClick={onFocus}/></header>
-    <div className="camera-frame">
-      {frame ? <img src={frame.url} alt={`Preview ${camera.name}`} aria-label={camera.id === 'engine-rtsp' || camera.source === 'RTSP_ENGINE' ? 'Preview RTSP lokal' : `Preview ${camera.name}`} onLoad={e => setSize(`${e.currentTarget.naturalWidth} × ${e.currentTarget.naturalHeight}`)} onError={() => { setFrame(null); setSize(null); }}/>
+    <div className="camera-frame" ref={frameArea}>
+      {frame ? <><img src={frame.url} alt={`Preview ${camera.name}`} aria-label={camera.id === 'engine-rtsp' || camera.source === 'RTSP_ENGINE' ? 'Preview RTSP lokal' : `Preview ${camera.name}`} onLoad={e => { const width = e.currentTarget.naturalWidth, height = e.currentTarget.naturalHeight; setSize(`${width} × ${height}`); setDimensions(current => current?.width === width && current?.height === height ? current : { width, height }); }} onError={() => { setFrame(null); setSize(null); }}/>
+        {bounds && <svg className="rtsp-camera-overlays" style={bounds} viewBox={`0 0 ${dimensions.width} ${dimensions.height}`} preserveAspectRatio="none" aria-label={detection ? `${detection.count} orang terdeteksi` : 'Overlay kamera'}>
+          {showZones && camera.analysis && zones.map(zone => <polygon key={zone.id} points={zone.polygon.map(([x, y]) => `${x * dimensions.width},${y * dimensions.height}`).join(' ')} className="rtsp-zone-outline"/>)}
+          {showDetections && detection?.detections.map((row, i) => <g key={row.track_id || i} data-testid="rtsp-person-detection">
+            <rect x={row.box[0] * dimensions.width} y={row.box[1] * dimensions.height} width={(row.box[2] - row.box[0]) * dimensions.width} height={(row.box[3] - row.box[1]) * dimensions.height} className="person-box"/>
+            <text x={row.box[0] * dimensions.width + 4} y={Math.max(14, row.box[1] * dimensions.height - 5)}>Orang {Math.round(row.confidence * 100)}%</text>
+            {row.workstation_times?.map((visit, j) => {
+              const font = Math.max(12, 11 * dimensions.width / Math.max(1, bounds.width));
+              const x = Math.max(0, Math.min(row.box[0] * dimensions.width + 4, dimensions.width - font * 11));
+              const y = row.box[1] * dimensions.height + font + 4 + j * (font + 8);
+              return <g key={visit.zone_id}>
+                <rect x={x - 2} y={y - font} width={font * 10.5} height={font + 5} fill="#101b18" fillOpacity="0.9" rx="3"/>
+                <text className="rtsp-presence-clock" data-testid="rtsp-presence-clock" style={{ fontSize: font }} x={x} y={y}>
+                  <title>{visit.name} — durasi kehadiran track ini pada kunjungan sekarang</title>
+                  Di meja {durationClock(visit.presence_us)}
+                </text>
+              </g>;
+            })}
+          </g>)}
+        </svg>}</>
         : <div className="camera-no-signal"><Camera size={24} aria-hidden="true"/><strong>{HEALTH[health] || 'Menunggu gambar'}</strong><p>{camera.error || 'Gambar muncul setelah koneksi kamera tersedia.'}</p></div>}
     </div>
-    <div className="camera-tile-info"><span>{camera.analysis ? 'Engine deteksi aktif' : 'Preview saja'}</span><span>{size || 'Resolusi belum tersedia'}</span></div>
+    <div className="camera-tile-info"><span data-testid="rtsp-detection-status">{camera.analysis ? detection ? `${detection.count} orang terdeteksi · ${detection.inference_ms} ms` : 'Menunggu hasil deteksi' : 'Preview saja'}</span><span>{size || 'Resolusi belum tersedia'}</span></div>
     <footer className="camera-tile-footer"><span>{camera.analysis ? camera.recorded ? 'Pencatatan live aktif' : 'Pencatatan belum dimulai' : 'Deteksi dan pencatatan belum aktif'}</span><time>{frame?.time ? new Date(Number(frame.time)).toLocaleTimeString('id-ID', { timeZone: camera.timezone }) : 'Waktu frame belum tersedia'}</time></footer>
   </section>;
 }
@@ -161,7 +194,7 @@ export function CameraWorkspace({ webcam, live, engine, page }) {
             const shown = displayed.some(c => c.id === camera.id), tileVisible = visible && documentVisible && shown;
             return <div key={camera.id} className={`camera-tile ${shown ? '' : 'camera-tile-hidden'} ${selected === camera.id ? 'camera-tile-selected' : ''}`} data-testid="camera-tile" data-camera-id={camera.id} tabIndex={shown ? 0 : -1} aria-label={`Kamera ${camera.name}`} onClick={() => setSelected(camera.id)} onDoubleClick={e => { if (!e.target.closest('button,select,input')) focusCamera(camera.id); }} onKeyDown={e => { if (e.target === e.currentTarget && e.key === 'Enter') { e.preventDefault(); focusCamera(camera.id); } }}>
               {camera.id === 'webcam' ? <WebcamPanel wall webcam={{ ...webcam, showDetections: prefs.detections, showZones: prefs.zones }} onFocus={() => focusCamera(camera.id)}/>
-                : <RtspTile camera={camera} visible={tileVisible} onFocus={() => focusCamera(camera.id)}/>}
+                : <RtspTile camera={camera} visible={tileVisible} latest={camera.analysis ? live.state?.latest : null} zones={camera.analysis ? live.state?.calibrations?.RTSP_LIVE?.zones : undefined} showDetections={prefs.detections} showZones={prefs.zones} onFocus={() => focusCamera(camera.id)}/>}
             </div>;
           })}
           {slots.filter(c => !c).map((_, i) => <button key={`empty-${i}`} className="camera-empty-tile" data-testid="camera-empty-slot" onClick={() => setDialog({ type: 'add' })}><Plus size={20} aria-hidden="true"/><strong>Tambah kamera</strong><span>Hubungkan sumber RTSP</span></button>)}

@@ -64,8 +64,20 @@ class Pipeline:
             logging.getLogger("cctv_tracker").error("PERSISTENCE_GAP: accounting stopped")
             raise
         self.last_utc = utc_us
+        # Use the committed visit timestamps for each person's current workstation
+        # timer. A new track/visit gets its own clock, never another occupant's time.
+        active_visits = self.database.conn.execute(
+            'SELECT track_id, workspace_id, start_utc_us, last_observed_utc_us FROM track_visits '
+            'WHERE generation_id=? AND end_utc_us IS NULL', (scoped_generation,)).fetchall()
+        workstation_times = {}
+        for visit in active_visits:
+            alias = next(alias for alias, config in self.writer.configs.items() if config[0] == visit['workspace_id'])
+            workstation_times.setdefault(visit['track_id'], []).append({
+                'zone_id': alias, 'name': next(z.name for z in self.settings.zones if z.id == alias),
+                'presence_us': max(0, visit['last_observed_utc_us'] - visit['start_utc_us']),
+            })
         return {"run_id": self.writer.run_id, "committed_sequence": self.writer.seq,
-                "detections": [dataclass_detection(d) for d in tracked],
+                "detections": [{**dataclass_detection(d), 'workstation_times': workstation_times.get(d.track_id, [])} for d in tracked],
                 "zones": [{"id": alias, "name": next(z.name for z in self.settings.zones if z.id == alias),
                            "state": a.current.state, "count": a.current.count, "reason": a.current.reason,
                            "state_since_utc_us": a.current.start, "evidence_until_utc_us": a.current.until}

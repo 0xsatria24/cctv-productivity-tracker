@@ -106,6 +106,19 @@ def test_bytetrack_ids_are_anonymous_and_predictions_not_evidence():
     assert tracker.update([detection], 5, "generation-2")[0].track_id.startswith("generation-2:")
 
 
+def test_slow_inference_confirms_new_tracks_without_fabricated_empty_frames():
+    tracker = Tracker(5, 3)
+    detection = Detection((0.1, 0.1, 0.4, 0.8), 0.95)
+    assert tracker.update([], 0, 'camera') == []
+    # A person enters after startup; actual samples arrive at 2.5 FPS.
+    tracker.update([detection], 0.4, 'camera')
+    confirmed = tracker.update([detection], 0.8, 'camera')[0].track_id
+    assert confirmed is not None
+    for at in (1.2, 1.6, 2.0):
+        assert tracker.update([detection], at, 'camera')[0].track_id == confirmed
+    assert tracker.update([], 2.4, 'camera') == []
+
+
 def test_unknown_settings_and_naive_timestamps_fail(tmp_path):
     path = tmp_path / "config.json"
     path.write_text('{"secret_password":"value"}')

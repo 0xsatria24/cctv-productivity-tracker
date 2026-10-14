@@ -42,11 +42,12 @@ class Tracker:
             self.last_time = None
         if self.last_time is not None and at_seconds <= self.last_time:
             raise ValueError("Tracker timestamps must advance")
-        empty = self.sv.Detections.empty()
         if self.last_time is not None:
             ticks = max(0, round((at_seconds - self.last_time) * self.fps) - 1)
-            for _ in range(ticks):
-                self.tracker.update_with_detections(empty)
+            # Age the pinned ByteTrack clock without inventing empty detections.
+            # Feeding empty frames here deletes unconfirmed tracks whenever
+            # inference is slower than the target FPS, preventing stable IDs.
+            self.tracker.frame_id += ticks
         inputs = self.sv.Detections(xyxy=np.asarray([d.box for d in detections], dtype=np.float32).reshape(-1, 4),
                                     confidence=np.asarray([d.confidence for d in detections], dtype=np.float32),
                                     class_id=np.zeros(len(detections), dtype=int))

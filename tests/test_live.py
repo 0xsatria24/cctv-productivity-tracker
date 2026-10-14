@@ -74,6 +74,9 @@ def test_live_tracking_durations_gap_duplicate_stop_and_database_isolation(live)
     second = controller.submit(b'fixture', session, 2)
     assert second['zones'][0]['state'] == 'OCCUPIED'
     assert first['detections'][0]['track_id'] == second['detections'][0]['track_id']
+    assert first['detections'][0]['workstation_times'][0]['presence_us'] == 0
+    assert second['detections'][0]['workstation_times'][0]['zone_id'] == 'desk'
+    assert second['detections'][0]['workstation_times'][0]['presence_us'] > 0
     time.sleep(0.15)
     controller.submit(b'fixture', session, 3)
     with pytest.raises(ValueError, match='duplikat'):

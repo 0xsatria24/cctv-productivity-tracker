@@ -52,6 +52,7 @@ export function useEngine() {
 }
 
 export function seconds(microseconds){if(microseconds==null)return 'N/A';const value=microseconds/1e6;if(value<60)return `${new Intl.NumberFormat('id-ID',{maximumFractionDigits:1}).format(value)} dtk`;const hours=Math.floor(value/3600),minutes=Math.floor((value%3600)/60),rest=Math.floor(value%60);return `${hours?`${hours}j `:''}${minutes}m ${rest}d`;}
+export function durationClock(microseconds){if(microseconds==null)return '--:--:--';const total=Math.max(0,Math.floor(microseconds/1e6));return [Math.floor(total/3600),Math.floor(total%3600/60),total%60].map(value=>String(value).padStart(2,'0')).join(':');}
 export function ratio(value){return value==null?'N/A':`${new Intl.NumberFormat('id-ID',{maximumFractionDigits:1}).format(value*100)}%`;}
 export function displayTime(value,timezone='Asia/Jakarta'){return value==null?'N/A':new Intl.DateTimeFormat('id-ID',{dateStyle:'medium',timeStyle:'medium',timeZone:timezone}).format(new Date(value/1000));}
 export function inputUtc(value){return value==null?'':new Date(value/1000).toISOString().slice(0,19);}
