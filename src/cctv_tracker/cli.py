@@ -130,7 +130,8 @@ def main(argv=None):
                 print(f"Dashboard: http://127.0.0.1:{args.port}/\nSources: live webcam / RTSP and isolated synthetic replay. Replay database: {settings.database}", flush=True)
             else:
                 app = create_app(settings.database, os.environ.get("CCTV_LOCAL_TOKEN", ""))
-            uvicorn.run(app, host="127.0.0.1", port=args.port, workers=1, access_log=False)
+            from .supervisor import run_server
+            run_server(app, host="127.0.0.1", port=args.port, workers=1, access_log=False)
         logger.info("Command completed: %s", args.command)
     except KeyboardInterrupt:
         logger.info("Command interrupted")

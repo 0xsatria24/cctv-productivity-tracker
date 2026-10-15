@@ -46,9 +46,9 @@ export function Heatmap({ intervals, endDate }) {
     return <button key={hour} className={`heat-cell ${selected?.day === day && selected?.hour === hour ? 'selected' : ''}`} style={{background:value.utilization == null ? 'var(--surface-raised)' : `color-mix(in srgb, var(--status-occupied) ${Math.round(value.utilization*.38)}%, var(--surface-video))`}} aria-label={`${day} ${hour}:00, utilization ${percent(value.utilization)}, coverage ${percent(value.coverage)}`} onClick={() => setSelected({day,hour,...value})}>{value.utilization == null ? 'N/A' : Math.round(value.utilization)}</button>;
   })}</div>)}</div><div className="selection-detail">{selected ? <>{selected.day} {selected.hour}:00 · Terisi {duration(selected.occupied,true)} · Coverage {percent(selected.coverage)}</> : 'Pilih sel untuk memeriksa durasi dan coverage.'}</div></div>;
 }
-export function Timeline({ records, workspaces, start, end, onSelect, selectedId, gapDescription='Rentang tanpa segmen: di luar jadwal, bukan kosong.' }) {
+export function Timeline({ records, workspaces, start, end, onSelect, selectedId, timezone='Asia/Jakarta', gapDescription='Rentang tanpa segmen: di luar jadwal, bukan kosong.' }) {
   const span = Math.max(1,end-start);
   const ticks = Array.from({length:5},(_,i) => start + i*span/4);
-  const label=value=>clock(value,undefined,span<60_000);
+  const label=value=>clock(value,timezone,span<60_000);
   return <div className="timeline"><div className="timeline-axis"><span>Workstation</span><div>{ticks.map(t => <time key={t}>{label(t)}</time>)}</div></div>{workspaces.map(w => <div className="timeline-row" key={w.id}><span>{w.name}</span><div className="timeline-track">{records.filter(i => i.workspaceId === w.id).map(item => <button className={`timeline-segment ${item.state.toLowerCase()} ${selectedId === item.id ? 'selected' : ''}`} key={item.id} style={{left:`${100*(item.start-start)/span}%`,width:`${100*(item.end-item.start)/span}%`}} aria-label={`${w.name}, ${label(item.start)}-${label(item.end)}, ${item.state}`} title={`${label(item.start)}-${label(item.end)} ${item.state}`} onClick={() => onSelect(item)}/>)}</div></div>)}<div className="chart-legend">{['OCCUPIED','EMPTY','UNKNOWN'].map(value => <Status key={value} value={value}/>)}<span className="caption">{gapDescription}</span></div></div>;
 }

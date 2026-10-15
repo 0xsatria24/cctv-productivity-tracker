@@ -71,9 +71,9 @@ def test_independent_previews_visibility_expiry_and_secret_redaction(tmp_path):
 
 
 def test_authenticated_preview_api_never_writes_observations(tmp_path, monkeypatch):
-    import cctv_tracker.camera_wall as module
-    original = module.CameraWall
-    monkeypatch.setattr(module, 'CameraWall', lambda settings: original(settings, capture_factory=TestCapture))
+    import cctv_tracker.fleet as module
+    original = module.CameraFleet
+    monkeypatch.setattr(module, 'CameraFleet', lambda settings, detector: original(settings, detector, capture_factory=TestCapture))
     path = tmp_path / 'api.sqlite3'
     with closing(Database(path)):
         pass

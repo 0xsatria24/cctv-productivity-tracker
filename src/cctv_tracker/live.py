@@ -69,6 +69,8 @@ class LiveController:
         latest = value.get('latest')
         if latest and (time.perf_counter_ns() - latest['processed_monotonic_ns']) / 1e9 > 3:
             value['latest'] = None
+        heartbeat = value.get('worker_heartbeat_ns')
+        value['unresponsive'] = bool(heartbeat and value['status'] in {'STARTING', 'RUNNING'} and (time.perf_counter_ns() - heartbeat) / 1e9 > (120 if value['status'] == 'STARTING' else 60))
         return value
 
     def _update(self, **values):
@@ -114,7 +116,7 @@ class LiveController:
             self.stop_event.clear()
             self.last_submitted = 0
             self.preview = None
-            self._update(status='STARTING', source=source, session_id=session, run_id=None, camera_health='RECONNECTING', processed=0, error=None, latest=None, preview_only=preview_only, camera_key=camera_key)
+            self._update(status='STARTING', source=source, session_id=session, run_id=None, camera_health='RECONNECTING', processed=0, error=None, latest=None, preview_only=preview_only, camera_key=camera_key, worker_heartbeat_ns=time.perf_counter_ns())
             self.thread = Thread(target=self._run, args=(config, profile, source, session, url, preview_only), name='live-occupancy', daemon=False)
             self.thread.start()
         return self.snapshot()
@@ -156,6 +158,14 @@ class LiveController:
             return None
         return value[1]
 
+    def preview_snapshot(self):
+        """Image and detection belong to the same committed frame."""
+        with self.lock:
+            if not self.preview or time.perf_counter_ns() - self.preview[0] > 3e9:
+                return None
+            return {'jpeg': self.preview[1], 'observation': copy.deepcopy(self.state.get('latest')),
+                    'utc_ms': self.preview[2], 'sequence': self.state['processed']}
+
     def _run(self, config, profile, source, session, url, preview_only):
         pipeline, capture, db = None, None, None
         seq, last_mono, last_valid, generation = 0, 0, time.perf_counter(), session
@@ -192,6 +202,7 @@ class LiveController:
                 return result
 
             while not self.stop_event.is_set():
+                self._update(worker_heartbeat_ns=time.perf_counter_ns())
                 item = None
                 if source == 'WEBCAM_LIVE':
                     try:
@@ -229,7 +240,7 @@ class LiveController:
                         result.update(accounting)
                         result.update(source=source, recorded=not preview_only, processed_monotonic_ns=time.perf_counter_ns())
                         with self.lock:
-                            self.preview = (time.perf_counter_ns(), item['jpeg'])
+                            self.preview = (time.perf_counter_ns(), item['jpeg'], (anchor_utc + (mono - anchor_mono) // 1000) // 1000)
                             self.state.update(camera_health='ONLINE', error=None, processed=self.state['processed'] + 1, latest=result)
                         if future and not future.done():
                             future.set_result(result)

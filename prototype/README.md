@@ -1,6 +1,10 @@
 # CCTV Workspace: interactive design prototype
 
+15 October operational UI update: guided camera setup, live overview, localized reporting periods/overnight shifts, explicit data completeness and report-to-timeline navigation. In integrated mode reports default to real-camera data; simulation remains explicitly selectable. See [implementation and verification](../docs/ui/OPERATIONS-IMPROVEMENTS.md).
+
 Integrated camera view update, 14 October 2026: multiple independent previews, 1/4/9/16 layouts, focus, fullscreen, search and per-camera state. Additional RTSP previews are explicitly separate from the single-source accounting engine. See [camera wall](../docs/runtime/CAMERA-WALL.md). This update applies to Python-served engine mode on port 8765; the standalone Vite mock prototype remains a separate mode.
+
+15 October camera display modes: the integrated Pemantauan Live workspace now shares **Grid**, **Fokus** (one primary plus five companions), and **Video wall**. Modes preserve camera selection, grid density and overlays, and reuse the mounted source components. The mode picker also works in fullscreen. Mode/density preferences survive reload; camera selection lasts for the UI session.
 
 Update 13 October 2026: the integrated dashboard supports webcam person detection through the local Python engine, with capture persisting across routes. See [webcam setup](../docs/runtime/WEBCAM.md). Update 14 October: live zone calibration, tracking, RTSP and SQLite occupancy reports are implemented. See [live engine workflow](../docs/runtime/LIVE-ENGINE.md).
 

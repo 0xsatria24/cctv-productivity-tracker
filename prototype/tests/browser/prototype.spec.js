@@ -11,13 +11,15 @@ test.beforeEach(async ({page})=>{
 test.afterEach(async ({page})=>{expect(page.errors).toEqual([]);expect(page.external).toEqual([]);});
 
 const nav=(page,name)=>page.getByRole('navigation').getByRole('button',{name,exact:true}).click();
+async function cameraControls(page){await nav(page,'Pemantauan Live');await page.getByText('Konfigurasi kamera simulasi',{exact:true}).click();}
 const close=page=>page.getByRole('button',{name:'Tutup dialog',exact:true}).click();
 async function scenario(page,label){await page.getByRole('button',{name:'Skenario',exact:true}).click();await page.getByRole('radio',{name:new RegExp(label)}).check();await page.getByRole('button',{name:'Terapkan skenario',exact:true}).click();}
 
-test('all seven pages navigate, hash routes reload and browser history works',async({page})=>{
-  for(const name of ['Pemantauan Live','Workstation','Analitik','Laporan','Kamera','Pengaturan','Ringkasan']){await nav(page,name);await expect(page.getByRole('heading',{level:1,name,exact:true})).toBeVisible();}
-  await nav(page,'Kamera');await page.reload();await expect(page.getByRole('heading',{level:1,name:'Kamera',exact:true})).toBeVisible();
-  await nav(page,'Laporan');await page.goBack();await expect(page.getByRole('heading',{level:1,name:'Kamera',exact:true})).toBeVisible();
+test('all six pages navigate, hash routes reload and browser history works',async({page})=>{
+  for(const name of ['Pemantauan Live','Workstation','Analitik','Laporan','Pengaturan','Ringkasan']){await nav(page,name);await expect(page.getByRole('heading',{level:1,name,exact:true})).toBeVisible();}
+  await page.goto('/#/cameras');await expect(page).toHaveURL(/#\/live$/);await page.reload();await expect(page.getByRole('heading',{level:1,name:'Pemantauan Live',exact:true})).toBeVisible();
+  await expect(page.getByRole('navigation').getByRole('button',{name:'Kamera',exact:true})).toHaveCount(0);
+  await nav(page,'Laporan');await page.goBack();await expect(page.getByRole('heading',{level:1,name:'Pemantauan Live',exact:true})).toBeVisible();
 });
 test('grid layouts, focused view, overlays and paused preview are functional',async({page})=>{
   await nav(page,'Pemantauan Live');await expect(page.locator('.video-tile')).toHaveCount(4);
@@ -42,7 +44,7 @@ test('manual activity generates events and automatic simulation can pause',async
   await page.getByRole('button',{name:'Mulai simulasi',exact:true}).click();await expect(page.locator('.simulation-clock')).toContainText('10:43:00',{timeout:6500});await page.getByRole('button',{name:'Jeda simulasi',exact:true}).click();
 });
 test('camera form saves configuration, does not persist a password, and connection test completes',async({page})=>{
-  await nav(page,'Kamera');await page.getByRole('button',{name:'Tambah kamera',exact:true}).click();
+  await cameraControls(page);await page.getByRole('button',{name:'Tambah kamera',exact:true}).click();
   await page.getByLabel('Nama kamera',{exact:true}).fill('Area inspeksi');await page.getByLabel('Password contoh (opsional)',{exact:false}).fill('mock-only-should-not-be-stored');
   await page.getByRole('button',{name:'Simpan kamera',exact:true}).click();
   await expect(page.locator('tbody')).toContainText('Area inspeksi');
@@ -51,7 +53,7 @@ test('camera form saves configuration, does not persist a password, and connecti
   await expect(page.locator('.job-row').first()).toContainText('Selesai');await close(page);await expect(row).toContainText('Terhubung');
 });
 test('failed connection scenario produces failed job and offline camera',async({page})=>{
-  await nav(page,'Kamera');await page.getByRole('button',{name:'Area produksi CAM-01'}).click();
+  await cameraControls(page);await page.getByRole('button',{name:'Area produksi CAM-01',exact:true}).click();
   await page.getByRole('button',{name:'Simulasi uji gagal',exact:true}).click();await expect(page.locator('.job-row').first()).toContainText('Gagal');await close(page);
   await expect(page.locator('tbody tr').filter({hasText:'Area produksi'})).toContainText('Tidak terhubung');
 });
@@ -93,7 +95,7 @@ test('empty first-run state uses N/A, and reset restores the fixture',async({pag
   await scenario(page,'Belum ada kamera / data');await expect(page.getByRole('heading',{name:'Workspace simulasi masih kosong'})).toBeVisible();
   await nav(page,'Laporan');await expect(page.locator('.metric-strip')).toContainText('N/A');
   await nav(page,'Pengaturan');await page.getByRole('button',{name:'Dataset prototipe',exact:true}).click();await page.getByRole('button',{name:'Reset data simulasi',exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:'Reset data simulasi',exact:true}).click();
-  await nav(page,'Kamera');await expect(page.locator('tbody tr')).toHaveCount(6);
+  await cameraControls(page);await expect(page.locator('tbody tr')).toHaveCount(6);
 });
 test('modal focus, Escape and desktop resize work; actual screenshots are captured',async({page})=>{
   await page.screenshot({path:'verification/screenshots/overview-1440.png',fullPage:true});

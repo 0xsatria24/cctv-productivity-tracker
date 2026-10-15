@@ -5,10 +5,12 @@ test('calibration, actual live frame ingestion, SQLite report, navigation, expor
   const errors = [];
   page.on('pageerror', e => errors.push(e.message));
   await page.goto('/#/cameras');
-  await page.getByRole('button', { name: 'Mulai webcam', exact: true }).click();
-  await expect(page.getByTestId('webcam-status')).toContainText('Live');
   await page.locator('.camera-session-controls > summary').click();
-  await page.getByRole('button', { name: 'Kalibrasi zona live', exact: true }).click();
+  await page.getByRole('button', { name: 'Lanjut ke cek koneksi', exact: true }).click();
+  await page.getByRole('button', { name: 'Hubungkan webcam', exact: true }).click();
+  await expect(page.getByTestId('webcam-status')).toContainText('Live');
+  await page.locator('.setup-progress button').nth(2).click();
+  await page.getByRole('button', { name: 'Atur zona', exact: true }).click();
   const modal = page.getByRole('dialog');
   await expect(modal).toBeVisible();
   // Use accessible numeric input to draw a full-frame test zone on the synthetic video.
@@ -24,9 +26,9 @@ test('calibration, actual live frame ingestion, SQLite report, navigation, expor
   await modal.getByLabel('Batas gap frame (detik)', { exact: true }).fill('5');
   await modal.getByRole('button', { name: 'Simpan kalibrasi live', exact: true }).click();
   await expect(modal).not.toBeVisible();
-  await page.getByRole('button', { name: 'Mulai pencatatan live', exact: true }).click();
+  await page.getByRole('button', { name: 'Mulai monitoring', exact: true }).click();
   await expect(page.getByLabel('Sumber data laporan', { exact: true })).toHaveValue('live');
-  await expect(page.getByTestId('webcam-engine-status')).toContainText('Tracking dan checkpoint SQLite aktif', { timeout: 25000 });
+  await expect(page.getByTestId('webcam-engine-status')).toContainText('Durasi zona tersimpan', { timeout: 25000 });
   await expect.poll(async () => (await (await page.request.get('/pilot/v1/reports?dataset=live')).json()).workstations.some(w => w.empty_us > 0), { timeout: 25000 }).toBe(true);
   const live = await (await page.request.get('/pilot/v1/live')).json();
   const runtime = (await (await page.request.get('/pilot/v1/status?dataset=live')).json()).detector;
@@ -44,13 +46,13 @@ test('calibration, actual live frame ingestion, SQLite report, navigation, expor
   await expect(page.getByTestId('engine-metrics')).not.toContainText('N/A');
   await page.getByRole('button', { name: 'Laporan', exact: true }).click();
   const download = page.waitForEvent('download');
-  await page.getByRole('button', { name: 'Ekspor CSV engine', exact: true }).click();
+  await page.getByRole('button', { name: 'Ekspor CSV', exact: true }).click();
   expect((await download).suggestedFilename()).toBe('cctv-engine-report.csv');
   await page.screenshot({ path: 'verification/screenshots/live-accounting-test-source-1440.png', fullPage: true });
-  await page.getByRole('button', { name: 'Hentikan pencatatan live', exact: true }).click();
+  await page.getByRole('button', { name: 'Hentikan monitoring', exact: true }).click();
   await expect.poll(async () => (await (await page.request.get('/pilot/v1/live')).json()).status).toBe('STOPPED');
   expect(await page.evaluate(() => window.testLiveTrack.readyState)).toBe('live');
-  await page.getByRole('button', { name: 'Kamera', exact: true }).click();
+  await page.getByRole('button', { name: 'Pemantauan Live', exact: true }).click();
   await page.getByRole('button', { name: 'Hentikan webcam', exact: true }).click();
   await page.getByRole('button', { name: 'Laporan', exact: true }).click();
   await page.getByLabel('Sumber data laporan', { exact: true }).selectOption('replay');

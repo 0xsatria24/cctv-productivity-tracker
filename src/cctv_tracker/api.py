@@ -1,7 +1,8 @@
 """Authenticated local pilot API and optional same-origin dashboard."""
-from contextlib import asynccontextmanager, closing
+from contextlib import asynccontextmanager, closing, ExitStack
 from pathlib import Path
 import csv
+import base64
 import io
 import secrets
 import sqlite3
@@ -85,35 +86,74 @@ class CameraViewInput(BaseModel):
     camera_ids: list[str] = Field(max_length=16)
 
 
+class CameraRecoveryInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    auto_resume: bool
+
+
+class BackupPolicyInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    enabled: bool
+    keep_days: int = Field(ge=1, le=365)
+
+
 def create_app(database: Path, token: str, *, controller=None, ui_dir: Path | None = None, timezone="Asia/Jakarta", detector_kind='yolox', openvino_device='GPU'):
     if len(token) < 32:
         raise ValueError("Pilot API requires a local token of at least 32 characters")
+    from .maintenance import BackupManager
+    backups = BackupManager(database)
+    if backups.journal.exists():
+        raise RuntimeError('Restore belum selesai. Jalankan ulang restore dengan backup ID yang sama.')
 
     @asynccontextmanager
     async def lifespan(app):
-        if detector_kind == 'yolox-openvino':
-            import cv2
-            import numpy as np
-            await run_in_threadpool(webcam_detector.detect, cv2.imencode('.jpg', np.zeros((64, 64, 3), dtype=np.uint8))[1].tobytes())
-        yield
-        if camera_wall:
-            camera_wall.shutdown()
-        if live:
-            live.shutdown()
-        if controller:
-            controller.shutdown()
+        from .lease import EngineLease
+        from .maintenance import app_lock_path
+        lease = None
+        try:
+            lease = EngineLease(app_lock_path(database))
+            if backups.journal.exists():
+                raise RuntimeError('Restore belum selesai. Jalankan ulang restore dengan backup ID yang sama.')
+            if detector_kind == 'yolox-openvino':
+                import cv2
+                import numpy as np
+                await run_in_threadpool(webcam_detector.detect, cv2.imencode('.jpg', np.zeros((64, 64, 3), dtype=np.uint8))[1].tobytes())
+            if camera_wall:
+                camera_wall.startup()
+            if controller:
+                backups.startup()
+            yield
+        finally:
+            with ExitStack() as cleanup:
+                if lease:
+                    cleanup.callback(lease.close)
+                if controller:
+                    cleanup.callback(controller.shutdown)
+                if live:
+                    cleanup.callback(live.shutdown)
+                if camera_wall:
+                    cleanup.callback(camera_wall.shutdown)
+                cleanup.callback(backups.shutdown)
 
     app = FastAPI(title="CCTV local pilot API", version="0.2.0", docs_url=None, redoc_url=None, lifespan=lifespan)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", *([] if ui_dir else ["testserver"])])
     bearer = HTTPBearer(auto_error=False)
     from .webcam import jpeg_dimensions
     from .engine import create_detector, create_live_engine
-    webcam_detector = create_detector(detector_kind, openvino_device)
+    from .fleet import CameraFleet, FairDetector
+    webcam_detector = FairDetector(create_detector(detector_kind, openvino_device))
     live = create_live_engine(controller.settings, webcam_detector) if controller and hasattr(controller, 'settings') else None
-    from .camera_wall import CameraWall
-    camera_wall = CameraWall(controller.settings) if live else None
+    camera_wall = CameraFleet(controller.settings, webcam_detector) if live else None
+    backups.fleet = camera_wall
 
-    def database_for(dataset):
+    def database_for(dataset, camera_id=None):
+        if camera_id:
+            if dataset != 'live' or not camera_wall:
+                raise HTTPException(status_code=422, detail='Pilih sumber Kamera live untuk laporan CCTV')
+            try:
+                return camera_wall.database(camera_id)
+            except LookupError:
+                raise HTTPException(status_code=404, detail='Kamera tidak ditemukan') from None
         if dataset == 'live':
             if not live:
                 raise HTTPException(status_code=409, detail='Engine live tidak tersedia pada mode ini')
@@ -139,12 +179,27 @@ def create_app(database: Path, token: str, *, controller=None, ui_dir: Path | No
             response.headers["Cache-Control"] = "no-store"
         return response
 
+    @app.get('/health')
+    def health():
+        states = ([live.snapshot()] if live else []) + ([c['engine'] for c in camera_wall.snapshot()['cameras']] if camera_wall else [])
+        if any(s.get('unresponsive') for s in states):
+            raise HTTPException(status_code=503, detail='Worker unresponsive')
+        return {'status': 'ok'}
+
     @app.get("/pilot/v1/status", dependencies=[Depends(authenticate)])
-    def status(dataset: Literal['replay', 'live'] = 'replay'):
-        with closing(Database(database_for(dataset), migrate=False)) as db, db.conn:
+    def status(dataset: Literal['replay', 'live'] = 'replay', camera_id: str | None = None):
+        with closing(Database(database_for(dataset, camera_id), migrate=False)) as db, db.conn:
             db.conn.execute("BEGIN")
             result = snapshot(db, controller, timezone)
             result.update(dataset=dataset, live=live.snapshot() if live else None, live_capture_available=bool(live))
+            result['camera_catalog'] = camera_wall.catalog() if camera_wall else []
+            result['selected_camera_id'] = camera_id
+            result['fleet'] = camera_wall.snapshot() if camera_wall else None
+            if camera_id:
+                try:
+                    result['live'] = camera_wall.get(camera_id).engine.snapshot()
+                except LookupError:
+                    result['live'] = None
             result['detector'] = {'model': webcam_detector.runtime_label, 'ready': webcam_detector.session is not None, 'runtime': dict(webcam_detector.manifest)}
             if dataset == 'live':
                 result['mode'] = 'integrated_live_pilot'
@@ -205,6 +260,10 @@ def create_app(database: Path, token: str, *, controller=None, ui_dir: Path | No
         if not live:
             raise HTTPException(status_code=409, detail='Engine live tidak tersedia')
         try:
+            if values.source == 'RTSP_LIVE' and camera_wall:
+                from .rtsp import rtsp_camera_key
+                if any(c.fingerprint == rtsp_camera_key(values.url or '') and c.engine.snapshot()['status'] in {'STARTING', 'RUNNING', 'STOPPING'} for c in camera_wall._cameras.values()):
+                    raise ValueError('Kamera ini sudah dianalisis pada grid multi-kamera')
             return live.start(values.source, values.url, preview_only=values.preview_only, camera_key=values.camera_key)
         except ValueError as error:
             raise HTTPException(status_code=409, detail=str(error)) from None
@@ -249,6 +308,46 @@ def create_app(database: Path, token: str, *, controller=None, ui_dir: Path | No
         except LookupError:
             raise HTTPException(status_code=404, detail='Kamera tidak ditemukan') from None
 
+    def managed_action(camera_id, action):
+        try:
+            require_wall().get(camera_id)
+            return action()
+        except LookupError:
+            raise HTTPException(status_code=404, detail='Kamera tidak ditemukan') from None
+        except (ValueError, RuntimeError):
+            raise HTTPException(status_code=409, detail='Perintah belum dapat dijalankan. Periksa sesi kamera, kalibrasi, dan penyimpanan.') from None
+
+    @app.post('/pilot/v1/camera-wall/cameras/{camera_id}/calibration', dependencies=[Depends(authenticate)])
+    def wall_calibrate(camera_id: str, values: CalibrationInput):
+        if values.source != 'RTSP_LIVE':
+            raise HTTPException(status_code=422, detail='Sumber harus RTSP')
+        value = values.model_dump(exclude={'source'})
+        return managed_action(camera_id, lambda: require_wall().calibrate(camera_id, value))
+
+    @app.post('/pilot/v1/camera-wall/cameras/{camera_id}/start', status_code=202, dependencies=[Depends(authenticate)])
+    def wall_start(camera_id: str):
+        camera = managed_action(camera_id, lambda: require_wall().get(camera_id))
+        primary = live.snapshot()
+        if primary['status'] in {'STARTING', 'RUNNING', 'STOPPING'} and primary.get('camera_key') == camera.fingerprint:
+            raise HTTPException(status_code=409, detail='Hentikan sesi RTSP utama sebelum memulai kamera ini di grid')
+        return managed_action(camera_id, lambda: require_wall().start_analysis(camera_id))
+
+    @app.post('/pilot/v1/camera-wall/cameras/{camera_id}/stop', dependencies=[Depends(authenticate)])
+    def wall_stop(camera_id: str):
+        return managed_action(camera_id, lambda: require_wall().stop_analysis(camera_id))
+
+    @app.post('/pilot/v1/camera-wall/cameras/{camera_id}/recovery', dependencies=[Depends(authenticate)])
+    def wall_recovery(camera_id: str, values: CameraRecoveryInput):
+        return managed_action(camera_id, lambda: require_wall().configure(camera_id, values.auto_resume))
+
+    @app.get('/pilot/v1/camera-wall/cameras/{camera_id}/observation', dependencies=[Depends(authenticate)])
+    def wall_observation(camera_id: str):
+        camera = managed_action(camera_id, lambda: require_wall().get(camera_id))
+        pair = camera.engine.preview_snapshot()
+        if not pair:
+            raise HTTPException(status_code=404, detail='Frame analisis baru belum tersedia')
+        return {**pair, 'jpeg': base64.b64encode(pair['jpeg']).decode('ascii')}
+
     @app.post('/pilot/v1/camera-wall/view', dependencies=[Depends(authenticate)])
     def wall_view(values: CameraViewInput):
         try:
@@ -267,9 +366,9 @@ def create_app(database: Path, token: str, *, controller=None, ui_dir: Path | No
         jpeg, utc_ms, seq = frame
         return Response(jpeg, media_type='image/jpeg', headers={'X-Frame-Time': str(utc_ms), 'X-Frame-Sequence': str(seq)})
 
-    def query(start_utc_us, end_utc_us, run_id, workspace_id, dataset):
+    def query(start_utc_us, end_utc_us, run_id, workspace_id, dataset, camera_id=None):
         try:
-            with closing(Database(database_for(dataset), migrate=False)) as db, db.conn:
+            with closing(Database(database_for(dataset, camera_id), migrate=False)) as db, db.conn:
                 db.conn.execute("BEGIN")
                 return dashboard_report(db, start_utc_us, end_utc_us, run_id, workspace_id)
         except ValueError:
@@ -278,15 +377,16 @@ def create_app(database: Path, token: str, *, controller=None, ui_dir: Path | No
             raise HTTPException(status_code=404, detail="Run tidak ditemukan") from None
 
     @app.get("/pilot/v1/reports", dependencies=[Depends(authenticate)])
-    def reports(start_utc_us: int | None = None, end_utc_us: int | None = None, run_id: str | None = None, workspace_id: str | None = None, dataset: Literal['replay', 'live'] = 'replay'):
-        return query(start_utc_us, end_utc_us, run_id, workspace_id, dataset)
+    def reports(start_utc_us: int | None = None, end_utc_us: int | None = None, run_id: str | None = None, workspace_id: str | None = None, dataset: Literal['replay', 'live'] = 'replay', camera_id: str | None = None):
+        return query(start_utc_us, end_utc_us, run_id, workspace_id, dataset, camera_id)
 
     @app.get("/pilot/v1/export.csv", dependencies=[Depends(authenticate)])
-    def export(start_utc_us: int | None = None, end_utc_us: int | None = None, run_id: str | None = None, workspace_id: str | None = None, dataset: Literal['replay', 'live'] = 'replay'):
-        result = query(start_utc_us, end_utc_us, run_id, workspace_id, dataset)
+    def export(start_utc_us: int | None = None, end_utc_us: int | None = None, run_id: str | None = None, workspace_id: str | None = None, dataset: Literal['replay', 'live'] = 'replay', camera_id: str | None = None):
+        result = query(start_utc_us, end_utc_us, run_id, workspace_id, dataset, camera_id)
         buffer = io.StringIO(newline="")
         writer = csv.writer(buffer)
         writer.writerow(["CCTV ENGINE", "identity_source=anonymous", "sources=" + ",".join(result["data_sources"]), "basis=monitoring_window", "schedule_applied=false"])
+        writer.writerow(['camera_id', camera_id or 'primary', 'timezone', timezone, 'start_utc_us', result['start_utc_us'], 'end_utc_us', result['end_utc_us']])
         writer.writerow(["workspace_id", "workspace", "occupied_us", "empty_us", "unknown_us", "eligible_us", "utilization", "coverage"])
         for row in result["workstations"]:
             name = row["workspace"]
@@ -298,6 +398,31 @@ def create_app(database: Path, token: str, *, controller=None, ui_dir: Path | No
     def require_controller():
         if not controller:
             raise HTTPException(status_code=409, detail="API ini hanya baca; jalankan command dashboard untuk replay")
+
+    @app.get('/pilot/v1/maintenance', dependencies=[Depends(authenticate)])
+    def maintenance_status():
+        return backups.status()
+
+    @app.post('/pilot/v1/maintenance/backup', status_code=202, dependencies=[Depends(authenticate)])
+    def maintenance_backup():
+        require_controller()
+        try:
+            return backups.request_backup()
+        except ValueError:
+            raise HTTPException(status_code=409, detail='Backup masih berjalan') from None
+
+    @app.post('/pilot/v1/maintenance/policy', dependencies=[Depends(authenticate)])
+    def maintenance_policy(values: BackupPolicyInput):
+        require_controller()
+        return backups.configure(values.enabled, values.keep_days)
+
+    @app.post('/pilot/v1/maintenance/backups/{backup_id}/verify', dependencies=[Depends(authenticate)])
+    def maintenance_verify(backup_id: str):
+        try:
+            value = backups.verify(backup_id)
+            return {'id': value['id'], 'verified': True, 'files': len(value['files'])}
+        except Exception:
+            raise HTTPException(status_code=422, detail='Verifikasi backup gagal; berkas rusak, hilang, atau tidak sesuai versi aplikasi') from None
 
     @app.post("/pilot/v1/replay", status_code=202, dependencies=[Depends(authenticate)])
     def start_replay():
@@ -313,21 +438,21 @@ def create_app(database: Path, token: str, *, controller=None, ui_dir: Path | No
         return controller.stop()
 
     @app.post("/pilot/v1/employees", status_code=201, dependencies=[Depends(authenticate)])
-    def employee(values: EmployeeInput, dataset: Literal['replay', 'live'] = 'replay'):
+    def employee(values: EmployeeInput, dataset: Literal['replay', 'live'] = 'replay', camera_id: str | None = None):
         require_controller()
         try:
-            with closing(Database(database_for(dataset), migrate=False)) as db:
+            with closing(Database(database_for(dataset, camera_id), migrate=False)) as db:
                 return {"id": db.add_employee(values.display_name), "source": "manual_registry"}
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from None
 
     @app.post("/pilot/v1/assignments", status_code=201, dependencies=[Depends(authenticate)])
-    def assignment(values: AssignmentInput, dataset: Literal['replay', 'live'] = 'replay'):
+    def assignment(values: AssignmentInput, dataset: Literal['replay', 'live'] = 'replay', camera_id: str | None = None):
         require_controller()
         if values.end_utc_us <= values.start_utc_us:
             raise HTTPException(status_code=422, detail="Akhir assignment harus setelah mulai")
         try:
-            with closing(Database(database_for(dataset), migrate=False)) as db:
+            with closing(Database(database_for(dataset, camera_id), migrate=False)) as db:
                 db.assign(values.employee_id, values.workspace_id, values.start_utc_us, values.end_utc_us)
             return {"status": "saved", "source": "manual_assignment", "is_observed_identity": False}
         except (ValueError, sqlite3.IntegrityError):

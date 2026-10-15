@@ -42,7 +42,8 @@ def main(argv=None):
             service.add(camera.camera_id, camera.url)
             if raw.get('autostart', False):
                 service.start(camera.camera_id)
-        uvicorn.run(app, host='127.0.0.1', port=values.get('port', 8766), workers=1, access_log=False)
+        from cctv_tracker.supervisor import run_server
+        run_server(app, host='127.0.0.1', port=values.get('port', 8766), workers=1, access_log=False)
     except (ValueError, OSError, RuntimeError) as error:
         # Do not print validation errors containing camera URLs/credentials.
         parser.exit(1, f'Headless startup failed ({type(error).__name__}); check config, license and model paths.\n')
