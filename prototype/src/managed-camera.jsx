@@ -46,7 +46,7 @@ export function ManagedCameraControls({ camera, engine }) {
       <Button onClick={() => { engine.setDataset('live'); engine.setCameraId(camera.id); window.location.hash = '/reports'; }}>Laporan kamera ini</Button>
     </div>
     <label className="check-control section-gap"><input type="checkbox" checked={autoResume} disabled={busy} onChange={event => changeRecovery(event.target.checked)}/>Pulihkan otomatis setelah gangguan atau aplikasi dimulai ulang</label>
-    <p className="caption">Kamera yang dihentikan manual tetap berhenti. Pemulihan otomatis mencoba maksimal lima kali saat engine gagal. Preview tidak merekam video.</p>
+    <p className="caption">Kamera yang dihentikan manual tetap berhenti. Pemulihan otomatis mencoba maksimal lima kali saat engine gagal. Rekaman video diatur terpisah di Pengaturan.</p>
     {camera.recovery_exhausted && <p role="alert">Pemulihan otomatis dihentikan setelah lima percobaan. Periksa perangkat, model, dan disk, lalu mulai analisis kembali.</p>}
     {(error || camera.engine?.error) && <p role="alert" className="error-text">{error || camera.engine.error}</p>}
     {camera.engine?.latest?.zones && <div className="live-zone-states">{camera.engine.latest.zones.map(zone => <div key={zone.id}><strong>{zone.name}</strong><Status value={zone.state}/><span>{zone.count == null ? 'Jumlah belum tersedia' : `${zone.count} orang teramati`}</span></div>)}</div>}

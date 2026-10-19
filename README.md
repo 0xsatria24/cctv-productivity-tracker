@@ -2,6 +2,10 @@
 
 Update UI/UX 15 Oktober: halaman Kamera memakai grid CCTV dan setup empat langkah; Ringkasan menampilkan kondisi kamera saat ini; Laporan menyediakan filter tanggal/jam shift, penjelasan kelengkapan, ekspor dan timeline. Sumber laporan awal adalah Kamera live. Rincian teknis berada di Pengaturan. Lihat [perbaikan UI operasional](docs/ui/OPERATIONS-IMPROVEMENTS.md).
 
+Auto-save laporan JSON/CSV dan rekaman preview MP4 sekarang tersedia di **Pengaturan**, dengan on/off dan interval terpisah 5 detik sampai 60 menit. Tujuan tambahan dapat berupa folder server/NAS, cloud via rclone, atau S3 compatible; upload berjalan melalui antrean yang tersimpan. Panduan, lokasi file, serta batas kualitas: [Auto-save data dan video](docs/runtime/AUTO-SAVE.md).
+
+Durasi di box memakai usia track anonim agar tidak hilang saat confidence zona turun. Label **Working / Idle** adalah indikator gerak visual, bukan bukti hasil kerja atau istirahat. Audit, konfigurasi, benchmark sebelum/sesudah dan keterbatasan: [Engine performance](docs/runtime/ENGINE-PERFORMANCE.md).
+
 Edisi tambahan **CCTV Headless Engine** tersedia tanpa frontend, dengan API multi-kamera, WebSocket, webhook, dan lisensi offline bertanda tangan. Panduan instalasi, konfigurasi, kontrak API, serta batas validasi: [Headless Engine](docs/runtime/HEADLESS.md). Jalankan `python -m editions.headless --help`; paket Enterprise dan Headless dibuat terpisah dengan `python scripts/build_editions.py`. Kedua edisi menggunakan engine yang sama.
 
 Status: dashboard React sudah terhubung ke engine Python melalui API lokal dan SQLite. Satu server menyajikan UI dan API; replay dapat dimulai/dihentikan dari dashboard. Preview beberapa kamera tersedia dalam grid 1/4/9/16. Kamera RTSP terkelola mendukung analisis bersamaan dengan kalibrasi, histori dan laporan terpisah per kamera. Konfigurasi terenkripsi, pemulihan otomatis, serta backup/restore tersedia. Validasi produksi, uji 24 jam dan instalasi Windows Service pada mesin target belum selesai. Lihat [pilot hardening](docs/runtime/PILOT-HARDENING.md).

@@ -16,7 +16,7 @@ class WebcamDetector:
         self.lock = threading.Lock()
         self.session = None
         self.sha = MODEL_SHA256
-        self.manifest = {'license': 'Apache-2.0', 'source': 'OpenCV Zoo YOLOX 47534e27c9851bb1128ccc0102f1145e27f23f98', 'threshold': 0.45, 'nms_iou': 0.5, 'provider': 'CPUExecutionProvider'}
+        self.manifest = {'license': 'Apache-2.0', 'source': 'OpenCV Zoo YOLOX 47534e27c9851bb1128ccc0102f1145e27f23f98', 'threshold': 0.45, 'tracking_candidate_threshold': 0.1, 'nms_iou': 0.5, 'provider': 'CPUExecutionProvider'}
         self.runtime_label = 'YOLOX · CPU'
 
     def _load_backend(self):
@@ -61,23 +61,29 @@ class WebcamDetector:
             padded = np.full((640, 640, 3), 114, dtype=np.uint8)
             padded[:resized.shape[0], :resized.shape[1]] = resized
             blob = cv2.cvtColor(padded, cv2.COLOR_BGR2RGB).transpose(2, 0, 1)[None].astype(np.float32)
+            prepared = time.perf_counter()
             predictions = self._infer(blob)
+            inferred = time.perf_counter()
             scores = predictions[:, 4] * predictions[:, 5]  # COCO person class 0
-            valid = (scores >= 0.45) & (predictions[:, 5:].argmax(axis=1) == 0)
+            valid = (scores >= self.manifest['tracking_candidate_threshold']) & (predictions[:, 5:].argmax(axis=1) == 0)
             p = predictions[valid]
             scores = scores[valid]
             centers = (p[:, :2] + self.grid[valid]) * self.strides[valid]
             sizes = np.exp(np.clip(p[:, 2:4], -20, 20)) * self.strides[valid]
             boxes = np.concatenate((centers - sizes / 2, sizes), axis=1) / scale
-            keep = cv2.dnn.NMSBoxes(boxes.tolist(), scores.tolist(), 0.45, 0.5)
-            detections = []
+            keep = cv2.dnn.NMSBoxes(boxes.tolist(), scores.tolist(), self.manifest['tracking_candidate_threshold'], 0.5)
+            candidates = []
             for i in np.asarray(keep).reshape(-1):
                 x, y, bw, bh = boxes[i]
                 box = np.clip([x / w, y / h, (x + bw) / w, (y + bh) / h], 0, 1).tolist()
                 if box[2] > box[0] and box[3] > box[1]:
-                    detections.append({"box": box, "confidence": round(float(scores[i]), 3)})
+                    candidates.append({"box": box, "confidence": round(float(scores[i]), 3)})
+            detections = [row for row in candidates if row['confidence'] >= self.manifest['threshold']]
             return {"model": self.runtime_label, "source": "WEBCAM_LIVE", "detections": detections,
+                    "tracking_candidates": candidates,
                     "count": len(detections), "width": w, "height": h,
+                    "preprocess_ms": round((prepared-started)*1000,2), "runtime_ms": round((inferred-prepared)*1000,2),
+                    "postprocess_ms": round((time.perf_counter()-inferred)*1000,2),
                     "inference_ms": round((time.perf_counter() - started) * 1000), "recorded": False}
         finally:
             self.lock.release()

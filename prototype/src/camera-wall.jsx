@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { Camera, ChevronLeft, ChevronRight, ListVideo, Maximize, Plus, Search, Trash2, X } from 'lucide-react';
 import { Button, Field, Modal, Status } from './components';
-import { engineRequest, durationClock } from './engine-client';
+import { engineRequest } from './engine-client';
 import { WebcamPanel } from './webcam';
 import { CAMERA_MODES, cameraView } from './camera-layout.mjs';
 import './camera-wall.css';
 import { ManagedCameraControls } from './managed-camera';
+import { TrackCaption } from './track-caption';
 
 const LAYOUTS = [1, 4, 9, 16];
 const HEALTH = { ONLINE: 'Live', CONNECTING: 'Menghubungkan', RECONNECTING: 'Menghubungkan ulang', STALLED: 'Frame terhenti', PAUSED: 'Preview dijeda', OFFLINE: 'Tidak terhubung' };
@@ -47,7 +48,7 @@ function useCameraRegistry(visibleIds) {
     setCameras(current => [...current.filter(c => c.id !== value.id), value]); return value;
   }
   async function remove(id) {
-    await engineRequest(`camera-wall/cameras/${id}`, { method: 'DELETE' });
+    await engineRequest(`camera-wall/cameras/${id}`, { method: 'DELETE', timeoutMs: 30000 });
     setCameras(current => current.filter(c => c.id !== id));
   }
   return { cameras, error, add, remove };
@@ -55,6 +56,7 @@ function useCameraRegistry(visibleIds) {
 
 function RtspTile({ camera, visible, onFocus, latest, zones = [], showDetections, showZones }) {
   const [frame, setFrame] = useState(null), [size, setSize] = useState(null), [dimensions, setDimensions] = useState(null), [bounds, setBounds] = useState(null);
+  const [analysis, setAnalysis] = useState(null);
   const frameArea = useRef(null);
   useEffect(() => {
     if (!dimensions || !frameArea.current || !visible) { setBounds(null); return; }
@@ -74,54 +76,66 @@ function RtspTile({ camera, visible, onFocus, latest, zones = [], showDetections
     let cancelled = false, timer, object, received = 0;
     const abort = new AbortController();
     async function poll() {
+      const started = performance.now();
       const request = new AbortController(), cancel = () => request.abort();
       abort.signal.addEventListener('abort', cancel, { once: true });
       const timeout = setTimeout(cancel, 4000);
       try {
-        const managed = camera.managed && camera.analysis;
-        const url = managed ? `/pilot/v1/camera-wall/cameras/${camera.id}/observation` : camera.id === 'engine-rtsp' || camera.source === 'RTSP_ENGINE' ? '/pilot/v1/live/preview.jpg' : `/pilot/v1/camera-wall/cameras/${camera.id}/frame.jpg`;
+        const url = camera.id === 'engine-rtsp' || camera.source === 'RTSP_ENGINE' && !camera.managed ? '/pilot/v1/live/preview.jpg' : `/pilot/v1/camera-wall/cameras/${camera.id}/frame.jpg?smooth=true`;
         const response = await fetch(url, { cache: 'no-store', signal: request.signal });
         if (!response.ok) throw new Error('No fresh frame');
-        const packet = managed ? await response.json() : null;
-        const next = packet ? `data:image/jpeg;base64,${packet.jpeg}` : URL.createObjectURL(await response.blob());
+        const next = URL.createObjectURL(await response.blob());
         if (cancelled) { URL.revokeObjectURL(next); return; }
         if (object) URL.revokeObjectURL(object);
         object = next; received = performance.now();
-        setFrame({ url: next, time: packet?.utc_ms ?? response.headers.get('X-Frame-Time'), observation: packet?.observation });
+        setFrame({ url: next, time: response.headers.get('X-Frame-Time') });
       } catch { if (!cancelled) { setFrame(null); setSize(null); } }
       finally {
         clearTimeout(timeout); abort.signal.removeEventListener('abort', cancel);
-        if (!cancelled) timer = setTimeout(poll, 500);
+        if (!cancelled) timer = setTimeout(poll, Math.max(0, 1000 / 24 - (performance.now() - started)));
       }
     }
     poll();
     const stale = setInterval(() => { if (received && performance.now() - received > 2500) { setFrame(null); setSize(null); } }, 500);
     return () => { cancelled = true; abort.abort(); clearTimeout(timer); clearInterval(stale); if (object) URL.revokeObjectURL(object); };
   }, [camera.id, camera.source, camera.analysis, visible]);
+  useEffect(() => {
+    setAnalysis(null);
+    if (!visible || !camera.managed || !camera.analysis) return;
+    const abort = new AbortController();
+    let timer, expiry;
+    async function poll() {
+      const started = performance.now();
+      try {
+        const packet = await engineRequest(`camera-wall/cameras/${camera.id}/observation?metadata_only=true`, {signal: abort.signal, timeoutMs: 2000});
+        if (abort.signal.aborted) return;
+        clearTimeout(expiry);
+        // Subtract the full request time conservatively; never renew an old
+        // result indefinitely just because the HTTP endpoint still responds.
+        const remaining = packet.valid_for_ms - (performance.now() - started);
+        setAnalysis(remaining > 0 && packet.observation ? {...packet.observation,presentation_age_ms:packet.source_age_ms || 0} : null);
+        if (remaining > 0) expiry = setTimeout(() => setAnalysis(null), remaining);
+      } catch { /* Keep the previous measured result only until its expiry. */ }
+      finally { if (!abort.signal.aborted) timer = setTimeout(poll, Math.max(0, 200 - (performance.now() - started))); }
+    }
+    poll();
+    return () => { abort.abort(); clearTimeout(timer); clearTimeout(expiry); };
+  }, [camera.id, camera.managed, camera.analysis, visible]);
   const health = frame && camera.health === 'ONLINE' ? 'ONLINE' : camera.health === 'ONLINE' ? 'CONNECTING' : camera.health;
-  const detection = frame && visible && camera.analysis && health === 'ONLINE' ? (camera.managed ? frame.observation : latest) : null;
+  const detection = frame && visible && camera.analysis && health === 'ONLINE' ? (camera.managed ? analysis : latest) : null;
   return <section className="rtsp-wall-panel">
     <header className="camera-tile-heading"><h2>{camera.name}</h2><Status value={health === 'PAUSED' ? 'DISABLED' : health === 'STALLED' ? 'DEGRADED' : health} label={HEALTH[health] || health}/><Button icon={Maximize} aria-label={`Fokus ${camera.name}`} onClick={onFocus}/></header>
     <div className="camera-frame" ref={frameArea}>
       {frame ? <><img src={frame.url} alt={`Preview ${camera.name}`} aria-label={camera.id === 'engine-rtsp' || camera.source === 'RTSP_ENGINE' ? 'Preview RTSP lokal' : `Preview ${camera.name}`} onLoad={e => { const width = e.currentTarget.naturalWidth, height = e.currentTarget.naturalHeight; setSize(`${width} × ${height}`); setDimensions(current => current?.width === width && current?.height === height ? current : { width, height }); }} onError={() => { setFrame(null); setSize(null); }}/>
         {bounds && <svg className="rtsp-camera-overlays" style={bounds} viewBox={`0 0 ${dimensions.width} ${dimensions.height}`} preserveAspectRatio="none" aria-label={detection ? `${detection.count} orang terdeteksi` : 'Overlay kamera'}>
           {showZones && camera.analysis && zones.map(zone => <polygon key={zone.id} points={zone.polygon.map(([x, y]) => `${x * dimensions.width},${y * dimensions.height}`).join(' ')} className="rtsp-zone-outline"/>)}
-          {showDetections && detection?.detections.map((row, i) => <g key={row.track_id || i} data-testid="rtsp-person-detection">
-            <rect x={row.box[0] * dimensions.width} y={row.box[1] * dimensions.height} width={(row.box[2] - row.box[0]) * dimensions.width} height={(row.box[3] - row.box[1]) * dimensions.height} className="person-box"/>
-            <text x={row.box[0] * dimensions.width + 4} y={Math.max(14, row.box[1] * dimensions.height - 5)}>Orang {Math.round(row.confidence * 100)}%</text>
-            {row.workstation_times?.map((visit, j) => {
-              const font = Math.max(12, 11 * dimensions.width / Math.max(1, bounds.width));
-              const x = Math.max(0, Math.min(row.box[0] * dimensions.width + 4, dimensions.width - font * 11));
-              const y = row.box[1] * dimensions.height + font + 4 + j * (font + 8);
-              return <g key={visit.zone_id}>
-                <rect x={x - 2} y={y - font} width={font * 10.5} height={font + 5} fill="#101b18" fillOpacity="0.9" rx="3"/>
-                <text className="rtsp-presence-clock" data-testid="rtsp-presence-clock" style={{ fontSize: font }} x={x} y={y}>
-                  <title>{visit.name} — durasi kehadiran track ini pada kunjungan sekarang</title>
-                  Di meja {durationClock(visit.presence_us)}
-                </text>
-              </g>;
-            })}
-          </g>)}
+          {showDetections && detection?.detections.map((row, i) => {
+            const box = row.display_box || row.box;
+            return <g key={row.track_id || i} data-testid="rtsp-person-detection">
+              <rect x={box[0]*dimensions.width} y={box[1]*dimensions.height} width={(box[2]-box[0])*dimensions.width} height={(box[3]-box[1])*dimensions.height} className="person-box"/>
+              <TrackCaption row={row} width={dimensions.width} height={dimensions.height} fontSize={Math.max(8,8*dimensions.width/Math.max(1,bounds.width))} ageMs={detection.presentation_age_ms}/>
+            </g>;
+          })}
         </svg>}</>
         : <div className="camera-no-signal"><Camera size={24} aria-hidden="true"/><strong>{HEALTH[health] || 'Menunggu gambar'}</strong><p>{camera.error || 'Gambar muncul setelah koneksi kamera tersedia.'}</p></div>}
     </div>
@@ -189,8 +203,8 @@ export function CameraWorkspace({ webcam, live, engine, page, onHealthChange }) 
     (prefs.mode === 'focus' ? setFocusPage : setGridPage)(Math.max(0, Math.min(currentPage + delta, pages - 1)));
   }
   async function removeCamera(id) {
-    try { await registry.remove(id); setDialog(null); setNotice('Kamera diarsipkan. Analisis dihentikan; histori tetap tersedia di laporan.'); }
-    catch (error) { setNotice(error.message); }
+    await registry.remove(id);
+    setDialog(null); setNotice('Kamera diarsipkan. Analisis dihentikan; histori tetap tersedia di laporan.');
   }
   return <section className={`camera-workspace ${visible && prefs.mode === 'wall' ? 'camera-workspace-wall' : ''} ${visible ? '' : 'camera-workspace-compact'} ${!visible && !webcam.stream && !['REQUESTING', 'CANCELLING'].includes(webcam.status) ? 'webcam-hidden' : ''}`} data-testid="camera-workspace" data-mode={prefs.mode}>
     <div className="camera-wall-toolbar">
@@ -217,16 +231,33 @@ export function CameraWorkspace({ webcam, live, engine, page, onHealthChange }) 
           })}
           {slots.filter(c => !c).map((_, i) => <button key={`empty-${i}`} className="camera-empty-tile" style={{ order: displayed.length + i }} data-testid="camera-empty-slot" onClick={() => setDialog({ type: 'add' })}><Plus size={20} aria-hidden="true"/><strong>Tambah kamera</strong><span>Hubungkan sumber RTSP</span></button>)}
         </div>
-        <div className="camera-wall-pagination"><span>{sources.filter(c => c.health === 'ONLINE').length} kamera terhubung · Video tidak disimpan</span><div className="inline-controls">{prefs.mode === 'focus' && <span>Kamera pendamping</span>}<Button icon={ChevronLeft} aria-label="Halaman kamera sebelumnya" disabled={currentPage === 0} onClick={() => changePage(-1)}/><span>{currentPage + 1} / {pages}</span><Button icon={ChevronRight} aria-label="Halaman kamera berikutnya" disabled={currentPage >= pages - 1} onClick={() => changePage(1)}/></div></div>
+        <div className="camera-wall-pagination"><span>{sources.filter(c => c.health === 'ONLINE').length} kamera terhubung · {engine.recordings?.data?.policy.video_enabled ? 'Rekaman video aktif' : 'Rekaman video nonaktif'}</span><div className="inline-controls">{prefs.mode === 'focus' && <span>Kamera pendamping</span>}<Button icon={ChevronLeft} aria-label="Halaman kamera sebelumnya" disabled={currentPage === 0} onClick={() => changePage(-1)}/><span>{currentPage + 1} / {pages}</span><Button icon={ChevronRight} aria-label="Halaman kamera berikutnya" disabled={currentPage >= pages - 1} onClick={() => changePage(1)}/></div></div>
       </div>
     </div>
     <div className="camera-selection-bar"><div><span>KAMERA DIPILIH</span><strong>{selectedCamera?.name || 'Pilih kamera'}</strong></div><p>{selectedCamera?.id === 'webcam' ? 'Analisis orang tersedia dari webcam. Kalibrasikan zona untuk mencatat durasi.' : selectedCamera?.analysis ? 'Sumber ini sedang diproses oleh engine live.' : 'Sumber ini menayangkan preview. Deteksi dan pencatatan belum diaktifkan untuk kamera ini.'}</p><Button disabled={!selectedCamera} onClick={() => focusCamera(selected)}>Fokus kamera</Button><Button disabled={!selectedCamera || hidden.includes(selected)} onClick={() => setHidden(h => [...h, selected])}>Sembunyikan dari grid</Button></div>
     {(notice || registry.error) && <p className="camera-wall-notice" role="status">{notice || `Daftar RTSP belum tersedia: ${registry.error}`}</p>}
     {selectedCamera?.managed && <ManagedCameraControls key={selectedCamera.id} camera={selectedCamera} engine={engine}/>}
-    <p className="camera-analysis-note">Pilih kamera untuk mengatur zona dan memulai analisis. Analisis RTSP tetap berjalan saat pindah halaman; kapasitas bergantung pada perangkat dan kelengkapan observasi.</p>
+    <p className="camera-analysis-note">Working / Idle adalah indikator gerak visual; diam belum membuktikan istirahat. Durasi pada box adalah usia track, bukan durasi produktif. Pilih kamera untuk mengatur zona dan memulai analisis. Analisis RTSP tetap berjalan saat pindah halaman; kapasitas bergantung pada perangkat dan kelengkapan observasi.</p>
     {dialog?.type === 'add' && <AddCameraDialog onClose={() => setDialog(null)} onSave={async (name, url) => { const camera = await registry.add(name, url); setDialog(null); setHidden(h => h.filter(id => id !== camera.id)); setSelected(camera.id); setFocusPage(0); setGridPage(Math.floor(enabled.length / prefs.layout)); }}/>}
-    {dialog?.type === 'remove' && <Modal title="Arsipkan kamera?" description={`${dialog.camera.name} akan dihentikan dan dikeluarkan dari grid. Histori laporan tetap tersimpan.`} onClose={() => setDialog(null)}><div className="modal-actions"><Button onClick={() => setDialog(null)}>Batal</Button><Button variant="danger" onClick={() => removeCamera(dialog.camera.id)}>Hapus kamera</Button></div></Modal>}
+    {dialog?.type === 'remove' && <RemoveCameraDialog camera={dialog.camera} onClose={() => setDialog(null)} onRemove={() => removeCamera(dialog.camera.id)}/>}
   </section>;
+}
+
+function RemoveCameraDialog({ camera, onClose, onRemove }) {
+  const [busy, setBusy] = useState(false), [error, setError] = useState('');
+  const pending = useRef(false);
+  async function remove() {
+    if (pending.current) return;
+    pending.current = true; setBusy(true); setError('');
+    try { await onRemove(); }
+    catch (failure) { setError(failure.message); }
+    finally { pending.current = false; setBusy(false); }
+  }
+  return <Modal title="Arsipkan kamera?" description={`${camera.name} akan dihentikan dan dikeluarkan dari grid. Histori laporan tetap tersimpan.`} onClose={busy ? () => {} : onClose}>
+    {busy && <p role="status">Menghentikan kamera dan menyimpan catatan terakhir...</p>}
+    {error && <p role="alert" className="error-text">{error}</p>}
+    <div className="modal-actions"><Button disabled={busy} onClick={onClose}>Batal</Button><Button variant="danger" disabled={busy} aria-busy={busy} onClick={remove}>{busy ? 'Mengarsipkan...' : 'Hapus kamera'}</Button></div>
+  </Modal>;
 }
 
 function AddCameraDialog({ onClose, onSave }) {

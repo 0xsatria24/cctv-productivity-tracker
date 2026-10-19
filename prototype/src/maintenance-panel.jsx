@@ -22,7 +22,7 @@ export function MaintenancePanel({ engine }) {
     finally { setBusy(false); }
   }
   function formatTime(value) { return value ? new Date(value * 1000).toLocaleString('id-ID', { timeZone: engine.snapshot?.timezone || 'Asia/Jakarta' }) : 'Belum ada'; }
-  return <Panel title="Backup dan pemulihan" caption="Database, kalibrasi, dan konfigurasi kamera dicadangkan di mesin ini. Video tidak disimpan.">
+  return <Panel title="Backup dan pemulihan" caption="Database, kalibrasi, dan konfigurasi kamera dicadangkan di mesin ini. File rekaman dikelola terpisah melalui Auto-save data dan video.">
     <p>Backup terakhir: <strong>{formatTime(data?.state.last_success)}</strong>{data?.busy ? ' · Backup sedang berjalan' : ''}</p>
     <div className="inline-controls"><Button variant="primary" disabled={busy || !data || data.busy} onClick={() => action('backup').then(() => engine.toast('Backup dimulai. Hasilnya akan muncul setelah verifikasi selesai.')).catch(() => {})}>Buat backup sekarang</Button>
       <label className="check-control"><input type="checkbox" checked={enabled} onChange={e => { setEnabled(e.target.checked); setDirty(true); }}/>Backup otomatis setiap 24 jam</label>

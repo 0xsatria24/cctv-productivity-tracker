@@ -43,6 +43,9 @@
 .camera-frame { position:relative; width:100%; min-height:0; flex:1; background:var(--surface-video); overflow:hidden; }.camera-frame img { display:block; width:100%; height:100%; object-fit:contain; }
 .rtsp-camera-overlays { position:absolute; pointer-events:none; }.rtsp-camera-overlays text { fill:#d8f5ec; stroke:#101b18; stroke-width:3px; paint-order:stroke; font:12px sans-serif; }.rtsp-zone-outline { fill:none; stroke:var(--accent-default); stroke-width:2; vector-effect:non-scaling-stroke; }
 .rtsp-camera-overlays .rtsp-presence-clock { fill:#fff0bc; font-weight:700; font-variant-numeric:tabular-nums; }
+.track-caption text { fill:#fff0bc; font-weight:700; font-variant-numeric:tabular-nums; }
+.track-caption .track-activity-working { fill:#b9ddd2; }
+.track-caption .track-activity-idle { fill:#f2ce86; }
 .camera-no-signal { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; padding:16px; color:var(--text-muted); text-align:center; }.camera-no-signal strong { color:var(--text-secondary); font-size:var(--font-caption); font-weight:500; }.camera-no-signal p { font-size:11px; max-width:240px; }
 .camera-empty-tile { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; min-height:0; width:100%; background:var(--surface-video); border:1px dashed var(--border-control); color:var(--text-muted); border-radius:var(--radius-panel); }
 .camera-empty-tile strong { font-size:var(--font-caption); color:var(--text-secondary); font-weight:500; }.camera-empty-tile span { font-size:11px; }.camera-empty-tile:hover { border-color:var(--accent-default); }

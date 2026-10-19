@@ -30,14 +30,21 @@ class Tracker:
     def __init__(self, fps, gap_seconds):
         import supervision as sv
         self.sv, self.fps, self.gap_seconds = sv, fps, gap_seconds
-        self.tracker = sv.ByteTrack(frame_rate=fps, track_activation_threshold=0.25, lost_track_buffer=30)
+        self.tracker = sv.ByteTrack(frame_rate=fps, track_activation_threshold=0.25,
+                                    lost_track_buffer=max(1, round(30 * gap_seconds)))
+        # Supervision scales the buffer from 30 FPS. Match the configured
+        # evidence gap in seconds, and require a strong measurement to spawn.
+        self.tracker.det_thresh = 0.45
         self.last_time = None
         self.generation = None
         self.last_tracks = []
+        self.retained_ids = set()
+        self.epoch = 0
 
     def update(self, detections, at_seconds, generation):
         import numpy as np
         if self.generation != generation or (self.last_time is not None and at_seconds - self.last_time > self.gap_seconds):
+            self.epoch = self.epoch+1 if self.generation == generation else 0
             self.tracker.reset()
             self.last_time = None
         if self.last_time is not None and at_seconds <= self.last_time:
@@ -57,11 +64,17 @@ class Tracker:
         for box, confidence, identifier in zip(tracked.xyxy, tracked.confidence, tracked.tracker_id):
             match = next((i for i, d in enumerate(result) if tuple(box) == tuple(np.asarray(d.box, dtype=np.float32))), None)
             if match is not None:
-                track_id = f"{generation}:{int(identifier)}"
+                track_id = f"{generation}:{self.epoch}:{int(identifier)}"
                 result[match] = Detection(result[match].box, float(confidence), track_id)
                 self.last_tracks.append(track_id)
         # Only current measured boxes are returned; predictions never create presence.
         self.last_time, self.generation = at_seconds, generation
+        from supervision.tracker.byte_tracker.core import TrackState
+        self.retained_ids = {f'{generation}:{self.epoch}:{int(t.external_track_id)}'
+                             for t in self.tracker.tracked_tracks+self.tracker.lost_tracks
+                             if t.state in (TrackState.Tracked,TrackState.Lost) and t.external_track_id > 0}
+        # Keep weak, unmatched measurements for UNKNOWN zone accounting.
+        # The live overlay filters them separately; they must not become EMPTY.
         return result
 
 

@@ -15,6 +15,7 @@ class PreviewCamera:
         self._lock, self._stop = Lock(), Event()
         self._jpeg, self._at, self._utc = None, 0, None
         self._health, self._error, self._seq = 'PAUSED', '', 0
+        self._item = None
         self._thread = Thread(target=self._run, daemon=True, name=f'preview-{self.id[:8]}')
 
     def start(self):
@@ -23,6 +24,7 @@ class PreviewCamera:
     def _clear(self, health, error=''):
         with self._lock:
             self._jpeg, self._at, self._utc = None, 0, None
+            self._item = None
             self._health, self._error = health, error
 
     def _run(self):
@@ -51,6 +53,7 @@ class PreviewCamera:
                     if 0 <= age <= 2.5:
                         with self._lock:
                             self._jpeg, self._at = item['jpeg'], item['monotonic_ns']
+                            self._item = item
                             self._utc = time.time() - age
                             self._health, self._error = 'ONLINE', ''
                             self._seq += 1
@@ -79,6 +82,11 @@ class PreviewCamera:
         with self._lock:
             if self._jpeg and 0 <= (time.perf_counter_ns() - self._at) / 1e9 <= 2.5:
                 return self._jpeg, round(self._utc * 1000), self._seq
+
+    def capture_snapshot(self):
+        with self._lock:
+            if self._item and 0 <= (time.perf_counter_ns()-self._at)/1e9 <= 2.5:
+                return self._item
 
     def stop(self):
         self._stop.set()

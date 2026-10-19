@@ -30,6 +30,24 @@ def entitlement(count=2):
     return License('headless', count, datetime.now(timezone.utc) + timedelta(days=1))
 
 
+def test_headless_cameras_share_one_model_instance(tmp_path,monkeypatch):
+    import editions.headless.service as module
+    created = []
+    def factory(*args):
+        detector = SimpleNamespace(detect=lambda jpeg: {'detections':[]})
+        created.append(detector)
+        return detector
+    monkeypatch.setattr(module,'create_detector',factory)
+    service = EngineService(Settings(database=tmp_path/'shared.sqlite3'),entitlement())
+    try:
+        service.add('a','rtsp://localhost/a')
+        service.add('b','rtsp://localhost/b')
+        assert len(created) == 1
+        assert service.get('a').detector is service.get('b').detector
+    finally:
+        service.shutdown()
+
+
 def test_signed_license_rejects_tampering_wrong_edition_and_expiry(tmp_path):
     key = Ed25519PrivateKey.generate()
     public = tmp_path / 'vendor.pem'

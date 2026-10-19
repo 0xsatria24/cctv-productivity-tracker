@@ -119,6 +119,39 @@ def test_slow_inference_confirms_new_tracks_without_fabricated_empty_frames():
     assert tracker.update([], 2.4, 'camera') == []
 
 
+def test_weak_measurement_continues_existing_id_without_spawning_or_claiming_presence():
+    tracker = Tracker(5, 3)
+    box = (.1, .1, .4, .8)
+    original = tracker.update([Detection(box, .95)], 0, 'camera')[0].track_id
+    weak = tracker.update([Detection(box, .2)], .2, 'camera')
+    assert weak[0].track_id == original
+    zone = Zone('a', 'a', ((0, 0), (1, 0), (1, 1), (0, 1)))
+    assert associate(weak, (zone,), Rules())['a'][0] == State.UNKNOWN
+    assert tracker.update([], .4, 'camera') == []  # Lost-track predictions are not evidence.
+    unmatched = Tracker(5, 3).update([Detection(box, .3)], 0, 'camera')
+    assert unmatched[0].track_id is None
+    assert associate(unmatched, (zone,), Rules())['a'][0] == State.UNKNOWN
+
+
+def test_configured_loss_buffer_recovers_id_after_short_occlusion():
+    tracker = Tracker(5, 3)
+    detection = Detection((.1, .1, .4, .8), .95)
+    original = tracker.update([detection], 0, 'camera')[0].track_id
+    for at in (.2, .4, .6, .8, 1., 1.2):
+        assert tracker.update([], at, 'camera') == []
+    assert tracker.update([detection], 1.4, 'camera')[0].track_id == original
+
+
+def test_gap_reset_does_not_reuse_the_same_anonymous_track_id():
+    tracker = Tracker(5,3)
+    detection = Detection((.1,.1,.4,.8),.95)
+    original = tracker.update([detection],0,'camera')[0].track_id
+    assert original in tracker.retained_ids
+    replacement = tracker.update([detection],4,'camera')[0].track_id
+    assert replacement != original
+    assert original not in tracker.retained_ids
+
+
 def test_unknown_settings_and_naive_timestamps_fail(tmp_path):
     path = tmp_path / "config.json"
     path.write_text('{"secret_password":"value"}')

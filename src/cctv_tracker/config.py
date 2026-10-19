@@ -56,6 +56,15 @@ class Settings:
     database: Path = field(default_factory=lambda: app_data() / "tracker.sqlite3")
     timezone: str = "Asia/Jakarta"
     inference_fps: int = 5
+    capture_fps: int = 24
+    capture_queue_size: int = 1
+    native_threads: int = 1
+    adaptive_inference: bool = False
+    minimum_inference_fps: int = 1
+    activity_enabled: bool = True
+    activity_idle_seconds: float = 8
+    activity_working_seconds: float = .8
+    box_smoothing_ms: float = 80
     frame_stale_seconds: float = 1
     open_timeout_seconds: float = 10
     read_timeout_seconds: float = 5
@@ -68,6 +77,14 @@ class Settings:
             raise ValueError("Site and camera IDs must not be empty")
         if not 1 <= self.inference_fps <= 30:
             raise ValueError("Inference FPS must be between 1 and 30")
+        if type(self.capture_fps) is not int or not 1 <= self.capture_fps <= 24 or type(self.capture_queue_size) is not int or not 1 <= self.capture_queue_size <= 4:
+            raise ValueError('Capture FPS must be 1..24 and queue capacity 1..4')
+        if type(self.native_threads) is not int or not 1 <= self.native_threads <= 8:
+            raise ValueError('Native threads must be 1..8')
+        if type(self.adaptive_inference) is not bool or type(self.activity_enabled) is not bool or not 1 <= self.minimum_inference_fps <= self.inference_fps:
+            raise ValueError('Invalid adaptive/activity configuration')
+        if not all(math.isfinite(v) for v in (self.activity_idle_seconds,self.activity_working_seconds,self.box_smoothing_ms)) or not 2 <= self.activity_idle_seconds <= 120 or not .2 <= self.activity_working_seconds <= 10 or not 0 <= self.box_smoothing_ms <= 200:
+            raise ValueError('Invalid motion confirmation or box smoothing settings')
         if any(not math.isfinite(v) or v <= 0 for v in (self.frame_stale_seconds, self.open_timeout_seconds, self.read_timeout_seconds)):
             raise ValueError("Timeouts must be positive and finite")
         if len({z.id for z in self.zones}) != len(self.zones):

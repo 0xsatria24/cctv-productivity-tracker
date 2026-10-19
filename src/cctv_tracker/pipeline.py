@@ -77,6 +77,7 @@ class Pipeline:
                 'presence_us': max(0, visit['last_observed_utc_us'] - visit['start_utc_us']),
             })
         return {"run_id": self.writer.run_id, "committed_sequence": self.writer.seq,
+                "retained_track_ids": sorted(self.tracker.retained_ids),
                 "detections": [{**dataclass_detection(d), 'workstation_times': workstation_times.get(d.track_id, [])} for d in tracked],
                 "zones": [{"id": alias, "name": next(z.name for z in self.settings.zones if z.id == alias),
                            "state": a.current.state, "count": a.current.count, "reason": a.current.reason,

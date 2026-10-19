@@ -20,7 +20,7 @@ def build(edition, output):
         shutil.copy2(ROOT / 'src/editions/__init__.py', source / 'editions/__init__.py')
         shutil.copytree(ROOT / 'src/editions' / edition, source / 'editions' / edition, ignore=shutil.ignore_patterns('__pycache__'))
         if edition == 'headless':
-            for name in ('api.py', 'dashboard.py', 'cli.py', '__main__.py', 'camera_wall.py', 'fleet.py', 'maintenance.py', 'deployment.py'):
+            for name in ('api.py', 'dashboard.py', 'cli.py', '__main__.py', 'camera_wall.py', 'fleet.py', 'maintenance.py', 'deployment.py', 'records.py', 'record_destinations.py'):
                 (source / 'cctv_tracker' / name).unlink()
         project = f'''[build-system]
 requires = ["setuptools==80.9.0"]
@@ -39,6 +39,7 @@ cctv_tracker = ["resources/*.sql", "resources/*.json"]
         (stage / 'pyproject.toml').write_text(project)
         bundle = stage / 'release'
         bundle.mkdir()
+        shutil.copy2(ROOT / 'docs/runtime/ENGINE-PERFORMANCE.md', bundle / 'ENGINE-PERFORMANCE.md')
         subprocess.run([sys.executable, '-m', 'pip', 'wheel', '--no-cache-dir', '--no-deps', '--no-build-isolation', '--wheel-dir', str(bundle), str(stage)], check=True)
         if edition == 'headless':
             shutil.copy2(ROOT / 'requirements.headless.lock.txt', bundle / 'requirements.txt')
@@ -58,6 +59,12 @@ cctv_tracker = ["resources/*.sql", "resources/*.json"]
             launch = "$ErrorActionPreference = 'Stop'\n$deployment = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'deployment.json') | ConvertFrom-Json\n$python = Join-Path $PSScriptRoot '.venv/Scripts/python.exe'\n& $python -m cctv_tracker.supervisor --state-dir (Join-Path (Split-Path -Parent $deployment.database) 'supervisor') --health-url (\"http://127.0.0.1:{0}/health\" -f $deployment.port) -- $python -m cctv_tracker.deployment --config (Join-Path $PSScriptRoot 'deployment.json')\nexit $LASTEXITCODE\n"
             shutil.copy2(ROOT / 'scripts/install-service.ps1', bundle / 'install-service.ps1')
             shutil.copy2(ROOT / 'docs/runtime/PILOT-HARDENING.md', bundle / 'PILOT-HARDENING.md')
+            shutil.copy2(ROOT / 'docs/runtime/AUTO-SAVE.md', bundle / 'AUTO-SAVE.md')
+            for name in ('rclone.exe', 'README.txt', 'COPYING', 'installed.json'):
+                helper = ROOT / 'runtime/tools/rclone' / name
+                if helper.is_file():
+                    (bundle / 'tools').mkdir(exist_ok=True)
+                    shutil.copy2(helper, bundle / 'tools' / name)
             (bundle / 'Start CCTV.cmd').write_text('@echo off\npowershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0run.ps1"\npause\n')
             (bundle / 'README.md').write_text('CCTV Enterprise: jalankan install.ps1, letakkan model webcam-yolox.onnx di models/, lalu run.ps1. Frontend sudah disertakan. Default OpenVINO GPU; ubah detector menjadi yolox dalam deployment.json untuk ONNX CPU. Model dan Python 3.12 tidak disertakan. Jalankan dalam environment terpisah dari Headless. Lihat PILOT-HARDENING.md untuk backup, restore, service, dan batas validasi.\n')
         (bundle / 'run.ps1').write_text(launch)

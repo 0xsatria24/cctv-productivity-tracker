@@ -63,6 +63,10 @@ class BackupManager:
 
     def members(self):
         items = {'replay.sqlite3': self.database, 'primary-live.sqlite3': self.database.with_name(self.database.stem + '-live.sqlite3')}
+        items['recording-policy.json'] = self.database.parent / (self.database.stem + '-records') / 'policy.json'
+        transfer = self.database.parent / (self.database.stem + '-records') / 'transfer'
+        items['record-destination.protected'] = transfer / 'destination.protected'
+        items['record-destination.key'] = transfer / 'destination.key'
         if self.fleet_root.exists():
             for path in self.fleet_root.iterdir():
                 if re.fullmatch(r'[0-9a-f]{32}-live\.sqlite3', path.name) or path.name in {'cameras.protected', 'cameras.key'}:
@@ -74,6 +78,10 @@ class BackupManager:
             return self.database
         if name == 'primary-live.sqlite3':
             return self.database.with_name(self.database.stem + '-live.sqlite3')
+        if name == 'recording-policy.json':
+            return self.database.parent / (self.database.stem + '-records') / 'policy.json'
+        if name in {'record-destination.protected', 'record-destination.key'}:
+            return self.database.parent / (self.database.stem + '-records') / 'transfer' / name.replace('record-', '')
         if re.fullmatch(r'fleet/([0-9a-f]{32}-live\.sqlite3|cameras\.protected|cameras\.key)', name):
             return self.fleet_root / name.split('/')[1]
         raise ValueError('Unsupported backup member')
@@ -139,6 +147,9 @@ class BackupManager:
                 raise ValueError('Backup checksum mismatch')
             if name.endswith('.sqlite3'):
                 verify_database(source.resolve())
+            elif name == 'recording-policy.json':
+                from .records import validate_policy
+                validate_policy(json.loads(source.read_text()))
         return value
 
     def list(self):
@@ -214,6 +225,10 @@ class BackupManager:
         """Offline only. A durable journal blocks app startup after partial restore."""
         manifest = self.verify(backup_id)
         root = self.root / backup_id
+        if 'record-destination.protected' in manifest['files']:
+            from .record_destinations import validate_destination
+            protected = root / 'record-destination.protected'
+            validate_destination(SecureStore(protected).decode(protected.read_bytes()), self.target('recording-policy.json').parent)
         if 'fleet/cameras.protected' in manifest['files']:
             from .fleet import CameraFleet
             # Decode before changing anything. DPAPI restores require the same OS account.
@@ -249,6 +264,14 @@ class BackupManager:
             # Restoring a snapshot predating the fleet must also restore the empty catalog.
             if 'fleet/cameras.protected' not in manifest['files'] and (self.fleet_root / 'cameras.protected').exists():
                 SecureStore(self.fleet_root / 'cameras.protected').save({'version': 1, 'cameras': []})
+            policy = self.target('recording-policy.json')
+            if 'recording-policy.json' not in manifest['files'] and policy.exists():
+                from .records import DEFAULT_POLICY
+                atomic_write(policy, json.dumps(DEFAULT_POLICY).encode())
+            destination = self.target('record-destination.protected')
+            if 'record-destination.protected' not in manifest['files'] and destination.exists():
+                from .record_destinations import DEFAULT_DESTINATION
+                SecureStore(destination).save(DEFAULT_DESTINATION)
             result = {**transaction, 'completed_at': time.time(), 'verified': True}
             atomic_write(self.receipt, json.dumps(result).encode())
             self.journal.unlink()

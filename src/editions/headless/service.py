@@ -7,6 +7,7 @@ from threading import RLock
 from cctv_tracker.engine import create_detector, create_live_engine
 from cctv_tracker.persistence import Database
 from cctv_tracker.rtsp import validate_rtsp_url, rtsp_camera_key
+from cctv_tracker.inference import FairDetector
 
 
 class EngineService:
@@ -15,6 +16,7 @@ class EngineService:
         self.detector_options = (detector, device, model_path)
         self.cameras = {}
         self.lock = RLock()
+        self.detector = None
 
     def add(self, camera_id, url):
         with self.lock:
@@ -25,7 +27,9 @@ class EngineService:
                 raise ValueError('Licensed camera limit reached')
             url = validate_rtsp_url(url)
             settings = replace(self.settings, database=self.settings.database.parent / (sha256(camera_id.encode()).hexdigest() + '.sqlite3'))
-            engine = create_live_engine(settings, create_detector(*self.detector_options))
+            if self.detector is None:
+                self.detector = FairDetector(create_detector(*self.detector_options))
+            engine = create_live_engine(settings, self.detector)
             self.cameras[camera_id] = (url, engine)
             return self.status(camera_id)
 

@@ -15,6 +15,7 @@ api = ["fastapi==0.115.12", "uvicorn==0.34.3"]
 headless = ["fastapi==0.115.12", "uvicorn==0.34.3", "websockets==15.0.1", "httpx==0.28.1", "cryptography==46.0.3"]
 openvino = ["openvino==2026.4.1", "openvino-telemetry==2025.2.0"]
 test = ["pytest==8.4.2", "onnx==1.19.0", "httpx==0.28.1"]
+performance = ["psutil==7.2.2", "requests==2.34.2"]
 
 [project.scripts]
 cctv-tracker = "cctv_tracker.cli:main"

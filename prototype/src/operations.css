@@ -62,3 +62,26 @@
 @media(max-width:1100px) { .engine-app main { padding:16px; }.operations-live-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); }.operations-overview-grid,.operations-report-grid { grid-template-columns:minmax(0,1fr); }.engine-app .operations-metrics { grid-template-columns:repeat(3,minmax(0,1fr)); }.operations-intro { align-items:flex-start; }.setup-progress button { padding:10px; gap:4px 6px; }.setup-progress strong { font-size:11px; } }
 @media(max-width:760px) { .operations-intro { flex-direction:column; gap:12px; }.operations-live-metrics { gap:8px; }.operations-live-metrics>div { padding:12px; }.operations-live-metrics strong { font-size:19px; }.setup-progress { grid-template-columns:repeat(2,minmax(0,1fr)); }.setup-step-content { padding:16px; }.operations-events>button { flex-wrap:wrap; gap:8px; }.operations-events time { width:100%; }.report-filter-panel .engine-filters .field { min-width:0; flex-basis:100%; }.operations-monitoring-ribbon { padding-inline:16px; } }
 .maintenance-command { white-space: pre-wrap; overflow-wrap: anywhere; padding: 16px; background: var(--bg, #14181c); border: 1px solid var(--border, #39434d); }
+
+.recording-settings { margin-bottom:20px; }
+.recording-options { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; margin:16px 0; }
+.recording-options fieldset { min-width:0; border:1px solid var(--border-subtle); padding:16px; border-radius:var(--radius-panel); }
+.recording-options legend { padding:0 8px; font-size:13px; color:var(--text-primary); }
+.recording-toggle { min-height:48px; padding:8px; cursor:pointer; border:1px solid var(--border-control); border-radius:var(--radius-control); }
+.recording-toggle:hover { background:var(--surface-hover); }
+.recording-toggle input[type=checkbox] { width:18px; height:18px; flex:0 0 18px; cursor:pointer; }
+.recording-toggle small { display:block; margin-top:4px; color:var(--text-muted); font-size:11px; }
+.recording-options .caption { margin:12px 0 0; line-height:1.65; }
+.recording-interval { display:grid; grid-template-columns:minmax(0,1fr) minmax(90px,.6fr); gap:12px; margin-top:16px; }
+.recording-summary { display:flex; flex-wrap:wrap; gap:12px 24px; padding:16px 0; font-size:12px; }
+.recording-folder { display:grid; gap:8px; padding:16px; border:1px solid var(--border-subtle); margin:16px 0; }
+.recording-folder code { overflow-wrap:anywhere; font-size:12px; }.recording-folder .button { justify-self:start; }
+.recording-file-heading { display:flex; align-items:center; flex-wrap:wrap; justify-content:space-between; gap:16px; margin:16px 0; }
+.recording-settings .button { text-decoration:none; }
+@media(max-width:760px) { .recording-options { grid-template-columns:minmax(0,1fr); }.recording-interval input,.recording-interval select { width:100%; min-width:0; } }
+
+.recording-destination { margin-bottom:20px; scroll-margin-top:16px; }
+.recording-destination .settings-form { padding:16px; }
+.recording-destination>.caption,.recording-destination>.inline-controls,.recording-destination>.recording-summary,.recording-destination>p { margin-inline:16px; }
+.recording-destination .upload-filename { overflow-wrap:anywhere; font-size:11px; }
+.recording-destination a { color:var(--accent-default); }

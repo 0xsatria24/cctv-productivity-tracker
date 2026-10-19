@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 export async function engineRequest(path, options={}) {
-  const timeout = AbortSignal.timeout(10000);
+  const { timeoutMs = 10000, ...fetchOptions } = options;
+  const timeout = AbortSignal.timeout(timeoutMs);
   let response;
-  try { response=await fetch(`/pilot/v1/${path}`,{credentials:'same-origin',cache:'no-store',...options,signal:options.signal?AbortSignal.any([options.signal,timeout]):timeout,
+  try { response=await fetch(`/pilot/v1/${path}`,{credentials:'same-origin',cache:'no-store',...fetchOptions,signal:options.signal?AbortSignal.any([options.signal,timeout]):timeout,
     headers:{...(options.body?{'Content-Type':'application/json'}:{}),...options.headers}}); }
   catch(error){if(options.signal?.aborted)throw error;throw new Error(error.name==='TimeoutError'?'Layanan monitoring melewati batas waktu. Periksa aplikasi; koneksi akan dicoba kembali.':'Layanan monitoring tidak dapat dijangkau. Periksa apakah aplikasi masih berjalan.');}
   if(!response.ok){let detail;try{detail=(await response.json()).detail;}catch{}throw new Error(typeof detail==='string'?detail:response.status===401?'Sesi engine berakhir. Muat ulang halaman untuk terhubung kembali.':`Engine mengembalikan HTTP ${response.status}.`);}

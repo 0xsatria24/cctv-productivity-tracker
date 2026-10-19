@@ -2,6 +2,8 @@
 
 15 October 2026. This increment adds concurrent RTSP analysis to the React dashboard, persistent camera configuration, verified backup/restore, a process supervisor, Windows SCM integration, release installation checks, and local video evaluation. These features advance the V1 pilot; they do not certify physical camera capacity or close every PRD acceptance criterion.
 
+18 October update: optional periodic report exports and preview MP4 recording are available in dashboard settings. See [Auto-save data and video](AUTO-SAVE.md) for controls, storage and quality limits.
+
 ## Dashboard workflow
 
 1. Open **Pemantauan Live** and **Tambah kamera**. Registration persists under the selected database's sibling `<stem>-fleet` directory. The registry encrypts the complete RTSP URL with Windows DPAPI CurrentUser. On Linux it uses Fernet with a local mode-0600 key; protect the data directory and backup copies. There is no plaintext URL in status or reports.
@@ -18,7 +20,7 @@ Changing URL/name and cross-camera report aggregation are not added in this incr
 
 **Pengaturan → Backup dan pemulihan** provides manual backup, daily automatic backup, retention of backup snapshots (1–365 days), verification and exact offline restore instructions. A job completes only after SQLite integrity, foreign-key, schema/checksum and artifact checksum checks. Each database is independently consistent; there is no single transaction across independent camera ledgers. At least two newest backups and pre-restore safety snapshots are kept. This retention policy does not delete observation history.
 
-Backups include replay, primary live, every managed-camera ledger, calibration and encrypted registry/key. They exclude video and model files. Schedule runs only while the engine is alive. Backups remain on the same local disk; off-device disaster recovery is a separate operational responsibility.
+Backups include replay, primary live, every managed-camera ledger, calibration and encrypted registry/key. They also include the auto-save policy when configured, but exclude exported report files, record catalogs, video and model files. Schedule runs only while the engine is alive. Backups remain on the same local disk; off-device disaster recovery is a separate operational responsibility.
 
 Restore requires stopping the app and supervisor/service. Use the command shown by the dashboard, or:
 

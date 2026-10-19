@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { TrackCaption } from './track-caption';
 import { Maximize, Play, RefreshCw, Settings, Square, Video } from 'lucide-react';
 import { Button, Field, Modal, Panel, Status } from './components';
 
@@ -226,7 +227,7 @@ function WebcamVideo({ webcam }) {
     {showDetections && webcam.showDetections !== false && <svg className="webcam-detections" aria-label="Bounding box deteksi orang" viewBox={`0 0 ${analysis.width} ${analysis.height}`} preserveAspectRatio={webcam.fit === 'cover' ? 'xMidYMid slice' : 'xMidYMid meet'}>{analysis.detections.map((d, i) => {
       const x = (webcam.mirror ? 1 - d.box[2] : d.box[0]) * analysis.width, y = d.box[1] * analysis.height;
       const width = (d.box[2] - d.box[0]) * analysis.width, height = (d.box[3] - d.box[1]) * analysis.height;
-      return <g key={i}><rect x={x} y={y} width={width} height={height} className="person-box"/><rect x={x} y={Math.max(0, y - 22)} width="155" height="22" className="person-label-bg"/><text x={x + 5} y={Math.max(0, y - 22) + 15}>{d.track_id ? `Track ${d.track_id.split(':').at(-1)}` : 'Orang'} · {Math.round(d.confidence * 100)}%</text></g>;
+      return <g key={d.track_id || i}><rect x={x} y={y} width={width} height={height} className="person-box"/><TrackCaption row={d} width={analysis.width} height={analysis.height} mirror={webcam.mirror}/></g>;
     })}</svg>}
     {webcam.stream && webcam.calibration && webcam.showZones !== false && <svg className="webcam-detections" viewBox={`0 0 ${webcam.width || 640} ${webcam.height || 480}`} preserveAspectRatio={webcam.fit === 'cover' ? 'xMidYMid slice' : 'xMidYMid meet'} aria-label="Zona kalibrasi webcam">{webcam.calibration.zones.map(zone => <polygon key={zone.id} points={zone.polygon.map(([x, y]) => `${(webcam.mirror ? 1 - x : x) * (webcam.width || 640)},${y * (webcam.height || 480)}`).join(' ')} className="zone-overlay"/>)}</svg>}
     {webcam.stream && <div className="webcam-video-tools"><span>{webcam.status === 'LIVE' ? 'WEBCAM LIVE' : LABELS[webcam.status]}</span><div className="inline-controls"><Button icon={Square} aria-label="Hentikan webcam dari preview" onClick={webcam.stop}>Hentikan</Button>{document.fullscreenEnabled && <Button icon={Maximize} aria-label={fullscreen ? 'Keluar layar penuh webcam' : 'Layar penuh webcam'} onClick={() => (fullscreen ? document.exitFullscreen() : container.current.requestFullscreen()).catch(() => setNotice('Layar penuh tidak tersedia dalam browser ini.'))}>{fullscreen ? 'Keluar layar penuh' : 'Layar penuh'}</Button>}</div></div>}

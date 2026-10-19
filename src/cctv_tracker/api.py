@@ -6,11 +6,12 @@ import base64
 import io
 import secrets
 import sqlite3
+import time
 from typing import Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import BaseModel, ConfigDict, Field
@@ -97,6 +98,31 @@ class BackupPolicyInput(BaseModel):
     keep_days: int = Field(ge=1, le=365)
 
 
+class RecordingPolicyInput(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    data_enabled: bool
+    data_interval_seconds: int = Field(ge=5, le=3600)
+    video_enabled: bool
+    video_segment_seconds: int = Field(ge=5, le=3600)
+    max_storage_mb: int = Field(ge=512, le=1048576)
+
+
+class RecordingDestinationInput(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    enabled: bool = False
+    kind: Literal['local','folder','rclone','s3'] = 'local'
+    folder: str = Field(default='', max_length=2048)
+    remote: str = Field(default='', max_length=100)
+    prefix: str = Field(default='CCTV', max_length=2048)
+    endpoint: str = Field(default='', max_length=2048)
+    bucket: str = Field(default='', max_length=128)
+    region: str = Field(default='us-east-1', max_length=80)
+    provider: str = Field(default='Other', max_length=80)
+    access_key: str = Field(default='', max_length=8192)
+    secret_key: str = Field(default='', max_length=8192)
+    session_token: str = Field(default='', max_length=8192)
+
+
 def create_app(database: Path, token: str, *, controller=None, ui_dir: Path | None = None, timezone="Asia/Jakarta", detector_kind='yolox', openvino_device='GPU'):
     if len(token) < 32:
         raise ValueError("Pilot API requires a local token of at least 32 characters")
@@ -122,6 +148,7 @@ def create_app(database: Path, token: str, *, controller=None, ui_dir: Path | No
                 camera_wall.startup()
             if controller:
                 backups.startup()
+                recordings.startup()
             yield
         finally:
             with ExitStack() as cleanup:
@@ -134,6 +161,7 @@ def create_app(database: Path, token: str, *, controller=None, ui_dir: Path | No
                 if camera_wall:
                     cleanup.callback(camera_wall.shutdown)
                 cleanup.callback(backups.shutdown)
+                cleanup.callback(recordings.shutdown)
 
     app = FastAPI(title="CCTV local pilot API", version="0.2.0", docs_url=None, redoc_url=None, lifespan=lifespan)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", *([] if ui_dir else ["testserver"])])
@@ -145,6 +173,8 @@ def create_app(database: Path, token: str, *, controller=None, ui_dir: Path | No
     live = create_live_engine(controller.settings, webcam_detector) if controller and hasattr(controller, 'settings') else None
     camera_wall = CameraFleet(controller.settings, webcam_detector) if live else None
     backups.fleet = camera_wall
+    from .records import RecordingManager
+    recordings = RecordingManager(database, live, camera_wall, timezone_name=timezone)
 
     def database_for(dataset, camera_id=None):
         if camera_id:
@@ -218,6 +248,7 @@ def create_app(database: Path, token: str, *, controller=None, ui_dir: Path | No
             body.extend(chunk)
         try:
             jpeg_dimensions(body)
+            recordings.submit_webcam(bytes(body))
             session = request.headers.get('x-live-session')
             if session:
                 if not live:
@@ -308,6 +339,9 @@ def create_app(database: Path, token: str, *, controller=None, ui_dir: Path | No
         except LookupError:
             raise HTTPException(status_code=404, detail='Kamera tidak ditemukan') from None
 
+        except (ValueError, RuntimeError):
+            raise HTTPException(status_code=409, detail='Kamera masih dihentikan. Tunggu sebentar, lalu coba arsipkan kembali. Histori laporan tetap tersimpan.') from None
+
     def managed_action(camera_id, action):
         try:
             require_wall().get(camera_id)
@@ -341,9 +375,17 @@ def create_app(database: Path, token: str, *, controller=None, ui_dir: Path | No
         return managed_action(camera_id, lambda: require_wall().configure(camera_id, values.auto_resume))
 
     @app.get('/pilot/v1/camera-wall/cameras/{camera_id}/observation', dependencies=[Depends(authenticate)])
-    def wall_observation(camera_id: str):
+    def wall_observation(camera_id: str, smooth: bool = False, metadata_only: bool = False):
         camera = managed_action(camera_id, lambda: require_wall().get(camera_id))
         pair = camera.engine.preview_snapshot()
+        from .observation_view import observation_view
+        if metadata_only:
+            return observation_view(pair, time.perf_counter_ns())
+        if smooth:
+            preview = camera.preview.frame()
+            if preview:
+                observation = observation_view(pair, time.perf_counter_ns())['observation']
+                pair = {'jpeg': preview[0], 'utc_ms': preview[1], 'sequence': preview[2], 'observation': observation}
         if not pair:
             raise HTTPException(status_code=404, detail='Frame analisis baru belum tersedia')
         return {**pair, 'jpeg': base64.b64encode(pair['jpeg']).decode('ascii')}
@@ -359,8 +401,9 @@ def create_app(database: Path, token: str, *, controller=None, ui_dir: Path | No
             raise HTTPException(status_code=404, detail=str(error)) from None
 
     @app.get('/pilot/v1/camera-wall/cameras/{camera_id}/frame.jpg', dependencies=[Depends(authenticate)])
-    def wall_frame(camera_id: str):
-        frame = require_wall().frame(camera_id)
+    def wall_frame(camera_id: str, smooth: bool = False):
+        camera = managed_action(camera_id, lambda: require_wall().get(camera_id))
+        frame = camera.preview.frame() if smooth else camera.frame()
         if not frame:
             raise HTTPException(status_code=404, detail='Frame baru belum tersedia')
         jpeg, utc_ms, seq = frame
@@ -402,6 +445,59 @@ def create_app(database: Path, token: str, *, controller=None, ui_dir: Path | No
     @app.get('/pilot/v1/maintenance', dependencies=[Depends(authenticate)])
     def maintenance_status():
         return backups.status()
+
+    @app.get('/pilot/v1/recordings', dependencies=[Depends(authenticate)])
+    def recording_status():
+        return recordings.status()
+
+    @app.get('/pilot/v1/recordings/destination', dependencies=[Depends(authenticate)])
+    def recording_destination_status():
+        return recordings.destinations.status()
+
+    def destination_action(action):
+        require_controller()
+        try:
+            return action()
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from None
+        except Exception:
+            raise HTTPException(status_code=503, detail='Tujuan penyimpanan belum dapat diakses; periksa izin folder, koneksi, dan konfigurasi transport.') from None
+
+    @app.post('/pilot/v1/recordings/destination', dependencies=[Depends(authenticate)])
+    def recording_destination_configure(values: RecordingDestinationInput):
+        return destination_action(lambda: recordings.destinations.configure(values.model_dump()))
+
+    @app.post('/pilot/v1/recordings/destination/test', status_code=202, dependencies=[Depends(authenticate)])
+    def recording_destination_test(values: RecordingDestinationInput):
+        return destination_action(lambda: recordings.destinations.test(values.model_dump()))
+
+    @app.get('/pilot/v1/recordings/destination/remotes', dependencies=[Depends(authenticate)])
+    def recording_destination_remotes():
+        return destination_action(recordings.destinations.discover)
+
+    @app.post('/pilot/v1/recordings/destination/retry', dependencies=[Depends(authenticate)])
+    def recording_destination_retry():
+        return destination_action(recordings.destinations.retry)
+
+    @app.post('/pilot/v1/recordings/destination/enqueue-recent', status_code=202, dependencies=[Depends(authenticate)])
+    def recording_destination_recent():
+        return destination_action(recordings.enqueue_recent)
+
+    @app.post('/pilot/v1/recordings/policy', dependencies=[Depends(authenticate)])
+    def recording_policy(values: RecordingPolicyInput):
+        require_controller()
+        try:
+            return recordings.configure(values.model_dump())
+        except OSError:
+            raise HTTPException(status_code=503, detail='Pengaturan auto-save gagal disimpan. Periksa akses folder penyimpanan.') from None
+
+    @app.get('/pilot/v1/recordings/files/{identifier}/{format}', dependencies=[Depends(authenticate)])
+    def recording_download(identifier: str, format: Literal['json', 'csv', 'mp4']):
+        try:
+            path = recordings.artifact(identifier, format)
+            return FileResponse(path, filename=path.name, media_type={'json': 'application/json', 'csv': 'text/csv', 'mp4': 'video/mp4'}[format])
+        except LookupError:
+            raise HTTPException(status_code=404, detail='File record belum tersedia atau sudah dipindahkan') from None
 
     @app.post('/pilot/v1/maintenance/backup', status_code=202, dependencies=[Depends(authenticate)])
     def maintenance_backup():

@@ -2,6 +2,7 @@
 from contextlib import closing
 import json
 import time
+from threading import Event, Thread
 from types import SimpleNamespace
 
 import pytest
@@ -33,6 +34,70 @@ def setup_camera(fleet, name):
     value = profile(); value['camera_key'] = row['camera_key']; value['rules']['max_evidence_gap_seconds'] = 0.5
     fleet.calibrate(row['id'], value)
     return row['id']
+
+
+def test_active_analysis_and_preview_share_one_capture_without_a_viewer(tmp_path):
+    captures = []
+    def factory(url, settings):
+        capture = Capture(url, settings)
+        captures.append(capture)
+        return capture
+    fleet = CameraFleet(Settings(database=tmp_path / 'shared.sqlite3'), FairDetector(FixtureDetector()), capture_factory=factory)
+    try:
+        camera_id = setup_camera(fleet,'shared')
+        fleet.start_analysis(camera_id)
+        camera = fleet.get(camera_id)
+        wait_for(lambda: camera.engine.snapshot()['processed'] > 5)
+        assert len(captures) == 1
+        assert camera.preview.capture_snapshot()['jpeg'] == b'fixture'
+        assert camera.engine.preview_snapshot()['jpeg'] == b'fixture'
+        # Closing an inference subscriber must not close the preview owner.
+        reader = camera.engine.capture_factory('',fleet.settings)
+        reader.close()
+        assert not captures[0].closed
+        assert camera.engine.snapshot()['latest']['detections'][0]['activity']['tracked_elapsed_us'] > 0
+    finally:
+        fleet.shutdown()
+    assert all(c.closed for c in captures)
+
+
+def test_archive_active_camera_releases_registry_lock_and_preserves_history(tmp_path):
+    fleet = CameraFleet(Settings(database=tmp_path / 'replay.sqlite3'), FairDetector(FixtureDetector()), capture_factory=Capture)
+    try:
+        camera_id = setup_camera(fleet, 'archive-active')
+        camera = fleet.get(camera_id)
+        fleet.subscribe('archive-test', [camera_id])
+        fleet.start_analysis(camera_id)
+        wait_for(lambda: camera.engine.snapshot()['processed'] > 3)
+        original_join = camera.join
+        inspected = Event()
+        def join_without_registry_lock():
+            # Model a preview worker already waiting in _wanted at shutdown.
+            def inspect():
+                fleet.snapshot()
+                inspected.set()
+            worker = Thread(target=inspect, daemon=True)
+            worker.start()
+            assert inspected.wait(1), 'Archive held registry lock while joining workers'
+            with pytest.raises(ValueError, match='diarsipkan'):
+                fleet.start_analysis(camera_id)
+            with pytest.raises(ValueError, match='diarsipkan'):
+                fleet.remove(camera_id)
+            original_join()
+            worker.join(timeout=1)
+        camera.join = join_without_registry_lock
+        started = time.perf_counter()
+        fleet.remove(camera_id)
+        assert time.perf_counter() - started < 5
+        assert not camera.preview._thread.is_alive()
+        assert not camera.engine.thread.is_alive()
+        assert not fleet.snapshot()['cameras']
+        assert next(c for c in fleet.catalog() if c['id'] == camera_id)['archived']
+        with closing(Database(fleet.database(camera_id))) as db:
+            assert db.conn.execute('SELECT COUNT(*) FROM zone_intervals').fetchone()[0] > 0
+            assert db.conn.execute('SELECT COUNT(*) FROM zone_intervals WHERE end_utc_us IS NULL').fetchone()[0] == 0
+    finally:
+        fleet.shutdown()
 
 
 def test_multi_camera_persistence_recovery_independent_gaps_and_archive(tmp_path):

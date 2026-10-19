@@ -10,6 +10,7 @@ build/
 *.engine.lock
 models/
 recordings/
+*-records/
 .venv/
 venv/
 
@@ -19,6 +20,8 @@ venv/
 !.env.example
 secrets/
 credentials/
+rclone.conf
+.rclone/
 *.db
 *.db-wal
 *.db-shm

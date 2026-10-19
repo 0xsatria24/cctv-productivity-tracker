@@ -18,6 +18,23 @@ def test_frame_header_rejects_invalid_or_oversized_before_decode():
             jpeg_dimensions(data)
 
 
+def test_detector_retains_weak_candidates_without_promoting_them_to_raw_people():
+    # Synthetic network output isolates decoder thresholds, no accuracy claim.
+    detector = WebcamDetector()
+    detector.session = object()
+    detector.grid = np.zeros((3, 2), dtype=np.float32)
+    detector.strides = np.ones((3, 1), dtype=np.float32)
+    output = np.zeros((3, 85), dtype=np.float32)
+    output[:, :4] = [[60, 60, np.log(40), np.log(80)], [250, 60, np.log(40), np.log(80)], [450, 60, np.log(40), np.log(80)]]
+    output[:, 4] = 1
+    output[:, 5] = [.9, .2, .05]
+    detector._infer = lambda blob: output
+    result = detector.detect(jpeg(640, 360))
+    assert result['count'] == 1
+    assert len(result['tracking_candidates']) == 2
+    assert [d['confidence'] for d in result['tracking_candidates']] == [.9, .2]
+
+
 def test_frame_endpoint_auth_validation_and_ephemeral_result(tmp_path, monkeypatch):
     # Injected detector tests API transport only, not model accuracy.
     monkeypatch.setattr(WebcamDetector, 'detect', lambda self, data: {'count': 0, 'detections': [], 'recorded': False})

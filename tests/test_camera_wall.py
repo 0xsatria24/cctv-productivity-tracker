@@ -91,6 +91,10 @@ def test_authenticated_preview_api_never_writes_observations(tmp_path, monkeypat
         wait(lambda: client.get('/pilot/v1/camera-wall', headers=headers).json()['cameras'][0]['health'] == 'ONLINE')
         image = client.get(f'/pilot/v1/camera-wall/cameras/{camera}/frame.jpg', headers=headers)
         assert image.status_code == 200 and image.headers['X-Frame-Time'] and image.headers['X-Frame-Sequence']
+        smooth = client.get(f'/pilot/v1/camera-wall/cameras/{camera}/observation?smooth=true', headers=headers)
+        assert smooth.status_code == 200
+        assert smooth.json()['observation'] is None
+        assert smooth.json()['jpeg']  # Preview stays available independently of inference.
         assert client.get('/pilot/v1/status', headers=headers).json()['runs'] == []
         assert client.get('/pilot/v1/status?dataset=live', headers=headers).json()['runs'] == []
         assert client.delete(f'/pilot/v1/camera-wall/cameras/{camera}', headers=headers).status_code == 200

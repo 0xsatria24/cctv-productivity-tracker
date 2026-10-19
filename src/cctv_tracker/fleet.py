@@ -1,11 +1,10 @@
 """Persistent multi-camera dashboard orchestration over the shared live engine."""
-from collections import deque
 from contextlib import closing
 from dataclasses import replace
 import copy
 from pathlib import Path
 import re
-from threading import Condition, Event, RLock, Thread
+from threading import Event, RLock, Thread
 import time
 from uuid import uuid4
 
@@ -15,37 +14,10 @@ from .persistence import Database
 from .rtsp import RtspCapture, validate_rtsp_url, rtsp_camera_key
 from .secure_store import SecureStore
 
+from .inference import FairDetector
+from .shared_capture import SharedPreviewCapture
+
 ACTIVE = {'STARTING', 'RUNNING', 'STOPPING'}
-
-
-class FairDetector:
-    """One model resident in memory; bounded FIFO arbitration between cameras."""
-    def __init__(self, detector):
-        self.detector = detector
-        self.condition, self.queue = Condition(), deque()
-
-    def __getattr__(self, name):
-        return getattr(self.detector, name)
-
-    def detect(self, jpeg):
-        ticket, deadline = object(), time.monotonic() + 2
-        with self.condition:
-            if len(self.queue) >= 18:
-                raise BlockingIOError('Antrean analisis penuh; frame dilewati')
-            self.queue.append(ticket)
-            while self.queue[0] is not ticket:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    self.queue.remove(ticket)
-                    self.condition.notify_all()
-                    raise BlockingIOError('Antrean analisis melewati batas waktu; frame dilewati')
-                self.condition.wait(remaining)
-        try:
-            return self.detector.detect(jpeg)
-        finally:
-            with self.condition:
-                self.queue.popleft()
-                self.condition.notify_all()
 
 
 class ManagedCamera:
@@ -53,7 +25,7 @@ class ManagedCamera:
         self.record = record
         self.id, self.name = record['id'], record['name']
         self.fingerprint = rtsp_camera_key(record['url'])
-        self.engine = LiveController(replace(settings, database=settings.database.parent / (self.id + '.sqlite3')), detector, capture_factory=capture_factory)
+        self.engine = LiveController(replace(settings, database=settings.database.parent / (self.id + '.sqlite3')), detector, capture_factory=lambda url, config: SharedPreviewCapture(self.preview))
         self.preview = PreviewCamera(self.name, record['url'], settings, wanted, capture_factory=capture_factory)
         self.preview.id = self.id
         self.failures, self.retry_at, self.healthy_since = 0, 0, None
@@ -99,6 +71,7 @@ class CameraFleet(CameraWall):
         self.settings = replace(settings, database=self.root / 'fleet.sqlite3')
         self.detector = detector
         self._lock = RLock()
+        self._removing = set()
         self.store = SecureStore(self.root / 'cameras.protected')
         self.records = self.store.load()
         self._validate_records(self.records)
@@ -137,7 +110,7 @@ class CameraFleet(CameraWall):
         with self._lock:
             camera = self._cameras.get(camera_id)
             if camera and camera.engine.snapshot()['status'] in ACTIVE:
-                return False
+                return True
             return super()._wanted(camera_id)
 
     def add(self, name, url):
@@ -196,6 +169,8 @@ class CameraFleet(CameraWall):
     def start_analysis(self, camera_id):
         with self._lock:
             camera = self.get(camera_id)
+            if camera.record.get('archived') or camera_id in self._removing:
+                raise ValueError('Kamera sedang diarsipkan')
             if camera.engine.snapshot()['status'] in ACTIVE:
                 raise ValueError('Kamera masih aktif atau sedang berhenti')
             if not camera.engine.profiles.get('RTSP_LIVE'):
@@ -258,10 +233,21 @@ class CameraFleet(CameraWall):
     def remove(self, camera_id):
         with self._lock:
             camera = self.get(camera_id)
+            if camera_id in self._removing:
+                raise ValueError('Kamera sedang diarsipkan')
             self._save_flags(camera, desired=False, archived=True)
+            self._removing.add(camera_id)
             camera.stop()
+        # The preview worker acquires this registry lock via _wanted(). Joining
+        # while holding it stalls shutdown and exceeds the browser timeout.
+        try:
             camera.join()
-            del self._cameras[camera_id]
+            with self._lock:
+                if self._cameras.get(camera_id) is camera:
+                    del self._cameras[camera_id]
+        finally:
+            with self._lock:
+                self._removing.discard(camera_id)
 
     def shutdown(self):
         self._stop.set()

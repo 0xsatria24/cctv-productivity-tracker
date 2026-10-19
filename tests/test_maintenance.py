@@ -60,6 +60,7 @@ def test_tamper_path_rejection_and_partial_restore_resume(tmp_path, monkeypatch)
     with pytest.raises(ValueError, match='checksum'):
         manager.restore(snapshot['id'])
     assert not manager.journal.exists()
+
     backup.write_bytes(content)
     import cctv_tracker.maintenance as module
     write = module.atomic_write
@@ -75,3 +76,44 @@ def test_tamper_path_rejection_and_partial_restore_resume(tmp_path, monkeypatch)
     monkeypatch.setattr(module, 'atomic_write', write)
     assert manager.restore(snapshot['id'])['safety_backup_id'] == safety
     assert not manager.journal.exists()
+
+def test_restore_recording_policy_and_disable_when_backup_predates_it(tmp_path):
+    from cctv_tracker.records import DEFAULT_POLICY, RecordingManager
+    path = tmp_path / 'site.sqlite3'
+    with closing(Database(path)):
+        pass
+    backup = BackupManager(path)
+    before_policy = backup.create()
+    recorder = RecordingManager(path)
+    enabled = {**DEFAULT_POLICY, 'video_enabled': True, 'data_enabled': True, 'video_segment_seconds': 5}
+    recorder.configure(enabled)
+    after_policy = backup.create()
+    assert 'recording-policy.json' in after_policy['files']
+    recorder.configure(DEFAULT_POLICY)
+    backup.restore(after_policy['id'])
+    assert RecordingManager(path).policy == enabled
+    backup.restore(before_policy['id'])
+    assert RecordingManager(path).policy == DEFAULT_POLICY
+
+
+def test_backup_restores_protected_upload_destination_and_old_backup_disables_it(tmp_path):
+    from cctv_tracker.records import RecordingManager
+    from cctv_tracker.record_destinations import DEFAULT_DESTINATION
+    path = tmp_path / 'site.sqlite3'
+    with closing(Database(path)):
+        pass
+    manager = RecordingManager(path)
+    backup = BackupManager(path)
+    before = backup.create()
+    configured = {**DEFAULT_DESTINATION,'kind':'s3','enabled':False,'endpoint':'https://example.invalid','bucket':'records',
+                  'access_key':'backup-fixture-access','secret_key':'backup-fixture-secret'}
+    manager.destinations.configure(configured)
+    after = backup.create()
+    assert 'record-destination.protected' in after['files']
+    assert b'backup-fixture-secret' not in (backup.root/after['id']/'record-destination.protected').read_bytes()
+    manager.destinations.configure(DEFAULT_DESTINATION)
+    backup.restore(after['id'])
+    restored = RecordingManager(path)
+    assert restored.destinations.config['secret_key'] == 'backup-fixture-secret'
+    backup.restore(before['id'])
+    assert RecordingManager(path).destinations.config == DEFAULT_DESTINATION

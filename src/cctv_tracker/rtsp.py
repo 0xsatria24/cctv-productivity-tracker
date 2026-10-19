@@ -38,9 +38,10 @@ def _latest(mailbox, item):
             pass
 
 
-def capture_worker(url, mailbox, stop, open_timeout, read_timeout):
+def capture_worker(url, mailbox, stop, open_timeout, read_timeout, capture_fps=24, native_threads=1):
     import av
     import cv2
+    cv2.setNumThreads(native_threads)
     # Native FFmpeg diagnostics may include credentials. Return only fixed errors.
     av.logging.set_level(av.logging.PANIC)
     generation = uuid4().hex
@@ -48,10 +49,12 @@ def capture_worker(url, mailbox, stop, open_timeout, read_timeout):
         with av.open(url, format='rtsp', options={'rtsp_transport': 'tcp', 'fflags': 'nobuffer', 'flags': 'low_delay'}, timeout=(open_timeout, read_timeout)) as container:
             if not container.streams.video:
                 raise ValueError('No video')
-            previous_pts, sampled = None, 0.0
+            container.streams.video[0].codec_context.thread_count = native_threads
+            previous_pts, sampled, decoded, encoded_count = None, 0.0, 0, 0
             for frame in container.decode(video=0):
                 if stop.is_set():
                     break
+                decoded += 1
                 # Repeated source PTS is not new evidence. A backwards PTS starts a generation.
                 if frame.pts is not None and previous_pts is not None:
                     if frame.pts == previous_pts:
@@ -60,9 +63,9 @@ def capture_worker(url, mailbox, stop, open_timeout, read_timeout):
                         generation = uuid4().hex
                 previous_pts = frame.pts
                 captured = time.perf_counter_ns()
-                if captured / 1e9 - sampled < 0.25:
+                if int(captured / 1e9 * capture_fps) <= sampled:
                     continue
-                sampled = captured / 1e9
+                sampled = int(captured / 1e9 * capture_fps)
                 if frame.width * frame.height > 4096 * 2160:
                     raise ValueError('Unsupported frame size')
                 width = max(1, round(frame.width * min(1, 640 / max(frame.width, frame.height))))
@@ -70,7 +73,10 @@ def capture_worker(url, mailbox, stop, open_timeout, read_timeout):
                 image = frame.reformat(width=width, height=height, format='bgr24').to_ndarray()
                 success, encoded = cv2.imencode('.jpg', image, [cv2.IMWRITE_JPEG_QUALITY, 75])
                 if success:
-                    _latest(mailbox, {'jpeg': encoded.tobytes(), 'monotonic_ns': captured, 'generation': generation})
+                    encoded_count += 1
+                    _latest(mailbox, {'jpeg': encoded.tobytes(), 'monotonic_ns': captured, 'generation': generation,
+                                     'capture_metrics':{'decoded':decoded,'sampled':encoded_count,'sample_skipped':decoded-encoded_count},
+                                     'source_pts_ns':round(float(frame.time)*1e9) if frame.time is not None else None})
     except Exception:
         _latest(mailbox, {'error': 'RTSP tidak dapat dibaca; periksa jaringan, URL, kredensial dan codec'})
     finally:
@@ -81,11 +87,15 @@ def capture_worker(url, mailbox, stop, open_timeout, read_timeout):
 class RtspCapture:
     def __init__(self, url, settings, *, worker=capture_worker):
         self.context = mp.get_context('spawn')
-        self.mailbox = self.context.Queue(maxsize=1)
+        self.mailbox = self.context.Queue(maxsize=settings.capture_queue_size)
         self.stop_event = self.context.Event()
-        self.process = self.context.Process(target=worker, args=(url, self.mailbox, self.stop_event, settings.open_timeout_seconds, settings.read_timeout_seconds), daemon=True)
+        args = (url, self.mailbox, self.stop_event, settings.open_timeout_seconds, settings.read_timeout_seconds)
+        if worker is capture_worker:
+            args += (settings.capture_fps,settings.native_threads)
+        self.process = self.context.Process(target=worker, args=args, daemon=True)
         self.process.start()
         self.started = time.perf_counter()
+        self.last_sampled, self.mailbox_dropped, self.delivered = 0, 0, 0
 
     def read(self, timeout=0.2):
         try:
@@ -95,6 +105,12 @@ class RtspCapture:
                 try:
                     item = self.mailbox.get_nowait()
                 except Empty:
+                    if item.get('capture_metrics'):
+                        metrics = item['capture_metrics']
+                        self.mailbox_dropped += max(0,metrics['sampled']-self.last_sampled-1)
+                        self.last_sampled = metrics['sampled']
+                        self.delivered += 1
+                        metrics.update(mailbox_dropped=self.mailbox_dropped,delivered=self.delivered)
                     return item
         except Empty:
             return None

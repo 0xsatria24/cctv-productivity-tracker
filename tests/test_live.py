@@ -108,6 +108,7 @@ def test_live_tracking_durations_gap_duplicate_stop_and_database_isolation(live)
         assert db.conn.execute('SELECT COUNT(*) FROM event_log WHERE event_type="ENTER"').fetchone()[0] == 1
         assert db.conn.execute('SELECT COUNT(*) FROM event_log WHERE event_type="EXIT"').fetchone()[0] == 1
         assert db.conn.execute('SELECT COUNT(*) FROM track_visits').fetchone()[0] > 0
+
         assert db.conn.execute('PRAGMA foreign_key_check').fetchall() == []
         assert db.conn.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
     assert not controller.settings.database.with_name('replay.sqlite3').exists()
@@ -118,6 +119,23 @@ def test_live_tracking_durations_gap_duplicate_stop_and_database_isolation(live)
     with pytest.raises(ValueError):
         controller.stop(session)
     controller.stop(next_session)
+
+
+def test_low_candidate_keeps_track_without_incrementing_presence(live):
+    controller, detector = live
+    session = controller.start('WEBCAM_LIVE', camera_key='a' * 64)['session_id']
+    wait_for(lambda: controller.snapshot()['status'] == 'RUNNING')
+    original = controller.submit(b'fixture', session, 1)['detections'][0]['track_id']
+    measured = detector.detect(b'fixture')
+    measured.update(count=0, detections=[], tracking_candidates=[{'box': [.1, .1, .4, .8], 'confidence': .2}])
+    detector.detect = lambda _: dict(measured)
+    result = controller.submit(b'fixture', session, 2)
+    assert result['count'] == 1
+    assert result['detections'][0]['track_id'] == original
+    assert result['detections'][0]['confidence'] == pytest.approx(.2)
+    assert result['detections'][0]['workstation_times'] == []
+    assert result['zones'][0]['state'] == 'UNKNOWN'
+    assert result['zones'][0]['count'] is None
 
 
 def test_changed_frame_aspect_never_generates_occupied_evidence(live):

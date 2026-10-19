@@ -47,6 +47,8 @@ def validate_calibration(value):
 
 class LiveController:
     def __init__(self, settings, detector, *, capture_factory=RtspCapture):
+        import cv2
+        cv2.setNumThreads(settings.native_threads)
         self.settings = replace(settings, database=settings.database.with_name(settings.database.stem + '-live.sqlite3'), zones=())
         self.detector, self.capture_factory = detector, capture_factory
         self.lock, self.command_lock, self.stop_event = Lock(), Lock(), Event()
@@ -111,7 +113,7 @@ class LiveController:
                 raise ValueError('Kamera berbeda dari kalibrasi tersimpan. Kalibrasikan kamera ini terlebih dahulu')
             zones, rules = validate_calibration({k: v for k, v in profile.items() if k != 'revision'}) if profile else ((), Rules(max_evidence_gap_seconds=3))
             config = replace(self.settings, camera_id=source.lower() + '-primary', zones=zones, rules=rules,
-                             inference_fps=5, frame_stale_seconds=rules.max_evidence_gap_seconds)
+                             frame_stale_seconds=rules.max_evidence_gap_seconds)
             session = str(uuid4())
             self.stop_event.clear()
             self.last_submitted = 0
@@ -164,12 +166,20 @@ class LiveController:
             if not self.preview or time.perf_counter_ns() - self.preview[0] > 3e9:
                 return None
             return {'jpeg': self.preview[1], 'observation': copy.deepcopy(self.state.get('latest')),
-                    'utc_ms': self.preview[2], 'sequence': self.state['processed']}
+                    'utc_ms': self.preview[2], 'sequence': self.state['processed'],
+                    'monotonic_ns': self.preview[3], 'published_monotonic_ns': self.preview[0]}
 
     def _run(self, config, profile, source, session, url, preview_only):
+        from .activity import TrackActivity
+        from .performance import Performance, AdaptiveRate, SystemLoad
+        activity = TrackActivity(config.rules.max_evidence_gap_seconds, config.activity_idle_seconds, config.activity_working_seconds, config.box_smoothing_ms, enabled=config.activity_enabled)
+        performance = Performance()
+        rate = AdaptiveRate(config.inference_fps,config.minimum_inference_fps,config.adaptive_inference)
+        resources = SystemLoad() if config.adaptive_inference else None
         pipeline, capture, db = None, None, None
         seq, last_mono, last_valid, generation = 0, 0, time.perf_counter(), session
         retry_at, attempts = 0.0, 0
+        last_rate_tick = None
         try:
             # Verify/load the same licensed model before creating a monitoring run.
             import cv2
@@ -229,19 +239,46 @@ class LiveController:
                         generation = item['generation']
                         mono = item['monotonic_ns']
                         if mono <= last_mono or time.perf_counter_ns() - mono > config.frame_stale_seconds * 1e9:
+                            performance.stale_dropped += 1
                             raise ValueError('Frame stale; kirim frame terbaru')
+                        if source == 'RTSP_LIVE':
+                            tick = (rate.fps,int((mono-anchor_mono)/1e9*rate.fps))
+                            if tick == last_rate_tick:
+                                performance.rate_skipped += 1
+                                continue
+                            last_rate_tick = tick
+                        started = time.perf_counter_ns()
                         result = self.detector.detect(item['jpeg'])
+                        inferred = time.perf_counter_ns()
                         if not preview_only and abs(result['width'] / result['height'] - profile['width'] / profile['height']) > 0.02:
                             raise ValueError('Rasio frame berubah. Hentikan sesi dan kalibrasikan ulang zona')
                         if time.perf_counter_ns() - mono > config.frame_stale_seconds * 1e9:
                             raise ValueError('Inferensi terlalu lambat; hasil tidak menjadi bukti')
-                        accounting = account([Detection(tuple(d['box']), d['confidence']) for d in result['detections']], mono)
+                        candidates = result.pop('tracking_candidates', result['detections'])
+                        accounting = account([Detection(tuple(d['box']), d['confidence']) for d in candidates], mono)
                         last_valid = mono / 1e9; attempts = 0
                         result.update(accounting)
+                        result['detections'] = [d for d in result['detections'] if d.get('track_id') is not None or d['confidence'] >= 0.45]
+                        accounted = time.perf_counter_ns()
+                        activity.annotate(item['jpeg'],result['detections'],mono,generation,accounting.get('retained_track_ids'))
+                        result['count'] = len(result['detections'])
+                        completed = time.perf_counter_ns()
+                        performance.record(capture_to_result_ms=(completed-mono)/1e6,
+                            scheduler_queue_ms=result.get('scheduler_queue_ms',0),detector_ms=(inferred-started)/1e6,
+                            accounting_ms=(accounted-inferred)/1e6,activity_ms=(completed-accounted)/1e6,
+                            frame_age_ms=(started-mono)/1e6,preprocess_ms=result.get('preprocess_ms'),
+                            runtime_ms=result.get('runtime_ms'),postprocess_ms=result.get('postprocess_ms'))
+                        resource_values = resources.sample() if resources else {}
+                        rate.observe((completed-started)/1e9,time.perf_counter(),**resource_values)
+                        metrics = performance.snapshot()
+                        metrics.update(target_fps=rate.fps,adaptive_enabled=rate.enabled,capture=item.get('capture_metrics'),resources=resource_values)
+                        scheduler = getattr(self.detector,'scheduling_snapshot',None)
+                        metrics['scheduler'] = scheduler() if scheduler else None
+                        metrics['resources_available'] = bool(resources and resources.psutil is not None)
                         result.update(source=source, recorded=not preview_only, processed_monotonic_ns=time.perf_counter_ns())
                         with self.lock:
-                            self.preview = (time.perf_counter_ns(), item['jpeg'], (anchor_utc + (mono - anchor_mono) // 1000) // 1000)
-                            self.state.update(camera_health='ONLINE', error=None, processed=self.state['processed'] + 1, latest=result)
+                            self.preview = (time.perf_counter_ns(), item['jpeg'], (anchor_utc + (mono - anchor_mono) // 1000) // 1000, mono)
+                            self.state.update(camera_health='ONLINE', error=None, processed=self.state['processed'] + 1, latest=result, performance=metrics)
                         if future and not future.done():
                             future.set_result(result)
                 except (ValueError, BlockingIOError) as error:
