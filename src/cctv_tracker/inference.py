@@ -45,4 +45,3 @@ class FairDetector:
     def scheduling_snapshot(self):
         with self.condition:
             return {'capacity':18,'pending':len(self.queue),'high_water':self.high_water,'rejected':self.rejected}
-
