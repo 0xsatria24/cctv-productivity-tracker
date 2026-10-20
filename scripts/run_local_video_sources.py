@@ -12,9 +12,15 @@ import av
 
 def publish(path, url, stop, failures):
     try:
+        with av.open(str(path)) as probe:
+            video = probe.streams.video[0]
+            rate = min(Fraction(24), Fraction(video.average_rate or 24))
+            scale = min(1, 960 / video.width, 540 / video.height)
+            width = max(2, int(video.width * scale) // 2 * 2)
+            height = max(2, int(video.height * scale) // 2 * 2)
         with av.open(url, 'w', format='rtsp', options={'rtsp_transport': 'tcp'}) as output:
-            stream = output.add_stream('libx264', rate=24)
-            stream.width, stream.height, stream.pix_fmt = 960, 540, 'yuv420p'
+            stream = output.add_stream('libx264', rate=rate)
+            stream.width, stream.height, stream.pix_fmt = width, height, 'yuv420p'
             stream.bit_rate = 900_000
             stream.options = {'preset': 'ultrafast', 'tune': 'zerolatency', 'g': '24', 'bf': '0'}
             index = 0
@@ -29,18 +35,18 @@ def publish(path, url, stop, failures):
                         timestamp = float(frame.time or 0)
                         if origin is None:
                             origin = timestamp
-                        sample = int((timestamp - origin) * 24 + 0.001)
+                        sample = int((timestamp - origin) * float(rate) + 0.001)
                         if sample <= last_sample:
                             continue
                         last_sample = sample
                         if stop.wait(max(0, deadline - time.perf_counter())):
                             break
-                        frame = frame.reformat(width=960, height=540, format='yuv420p')
-                        frame.pts, frame.time_base = index, Fraction(1, 24)
+                        frame = frame.reformat(width=width, height=height, format='yuv420p')
+                        frame.pts, frame.time_base = index, 1 / rate
                         for packet in stream.encode(frame):
                             output.mux(packet)
                         index += 1
-                        deadline += 1 / 24
+                        deadline += float(1 / rate)
             for packet in stream.encode():
                 output.mux(packet)
     except Exception as error:
