@@ -27,7 +27,7 @@ class Detection:
 class Tracker:
     """ByteTrack frame aging is stepped by elapsed time, bounded by gap reset."""
 
-    def __init__(self, fps, gap_seconds):
+    def __init__(self, fps, gap_seconds, recovery_seconds=1):
         import supervision as sv
         self.sv, self.fps, self.gap_seconds = sv, fps, gap_seconds
         self.tracker = sv.ByteTrack(frame_rate=fps, track_activation_threshold=0.25,
@@ -40,6 +40,31 @@ class Tracker:
         self.last_tracks = []
         self.retained_ids = set()
         self.epoch = 0
+        self.recovery_seconds = min(recovery_seconds,gap_seconds)
+        self.last_measured = {}
+
+    def _recover_recent_weak_matches(self, detections, at):
+        """Allow only unique, overlapping recent lost tracks into low-score matching.
+
+        This changes association eligibility, never a measurement or its confidence.
+        ByteTrack still performs the match and returns measured boxes only.
+        """
+        if not self.recovery_seconds:
+            return
+        from supervision.tracker.byte_tracker.core import TrackState
+        def iou(a,b):
+            overlap=max(0,min(a[2],b[2])-max(a[0],b[0]))*max(0,min(a[3],b[3])-max(a[1],b[1]))
+            return overlap/max(1e-12,(a[2]-a[0])*(a[3]-a[1])+(b[2]-b[0])*(b[3]-b[1])-overlap)
+        tracks=[t for t in self.tracker.tracked_tracks+self.tracker.lost_tracks if t.external_track_id>0]
+        for track in self.tracker.lost_tracks:
+            if track.state != TrackState.Lost or at-self.last_measured.get(track.external_track_id,float('-inf')) > self.recovery_seconds:
+                continue
+            matches=[d for d in detections if .1 < d.confidence < self.tracker.track_activation_threshold and iou(track.tlbr,d.box)>=.6]
+            if len(matches)!=1:
+                continue
+            if sum(iou(t.tlbr,matches[0].box)>=.3 for t in tracks)!=1:
+                continue  # An overlap between workers must not be guessed into an identity.
+            track.state=TrackState.Tracked
 
     def update(self, detections, at_seconds, generation):
         import numpy as np
@@ -47,6 +72,7 @@ class Tracker:
             self.epoch = self.epoch+1 if self.generation == generation else 0
             self.tracker.reset()
             self.last_time = None
+            self.last_measured.clear()
         if self.last_time is not None and at_seconds <= self.last_time:
             raise ValueError("Tracker timestamps must advance")
         if self.last_time is not None:
@@ -55,6 +81,11 @@ class Tracker:
             # Feeding empty frames here deletes unconfirmed tracks whenever
             # inference is slower than the target FPS, preventing stable IDs.
             self.tracker.frame_id += ticks
+        # Enforce per-person expiry in elapsed seconds, independent of irregular FPS.
+        for name in ('tracked_tracks','lost_tracks'):
+            setattr(self.tracker,name,[t for t in getattr(self.tracker,name)
+                    if t.external_track_id not in self.last_measured or at_seconds-self.last_measured[t.external_track_id]<=self.gap_seconds])
+        self._recover_recent_weak_matches(detections,at_seconds)
         inputs = self.sv.Detections(xyxy=np.asarray([d.box for d in detections], dtype=np.float32).reshape(-1, 4),
                                     confidence=np.asarray([d.confidence for d in detections], dtype=np.float32),
                                     class_id=np.zeros(len(detections), dtype=int))
@@ -67,12 +98,16 @@ class Tracker:
                 track_id = f"{generation}:{self.epoch}:{int(identifier)}"
                 result[match] = Detection(result[match].box, float(confidence), track_id)
                 self.last_tracks.append(track_id)
+                self.last_measured[int(identifier)] = at_seconds
         # Only current measured boxes are returned; predictions never create presence.
         self.last_time, self.generation = at_seconds, generation
         from supervision.tracker.byte_tracker.core import TrackState
         self.retained_ids = {f'{generation}:{self.epoch}:{int(t.external_track_id)}'
                              for t in self.tracker.tracked_tracks+self.tracker.lost_tracks
                              if t.state in (TrackState.Tracked,TrackState.Lost) and t.external_track_id > 0}
+        retained_numbers={t.external_track_id for t in self.tracker.tracked_tracks+self.tracker.lost_tracks
+                          if t.state in (TrackState.Tracked,TrackState.Lost)}
+        self.last_measured={key:value for key,value in self.last_measured.items() if key in retained_numbers}
         # Keep weak, unmatched measurements for UNKNOWN zone accounting.
         # The live overlay filters them separately; they must not become EMPTY.
         return result

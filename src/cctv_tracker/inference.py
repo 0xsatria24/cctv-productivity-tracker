@@ -1,5 +1,6 @@
 """Bounded fair scheduling shared by dashboard and headless editions."""
 from collections import deque
+from contextlib import contextmanager
 from threading import Condition
 import time
 
@@ -9,12 +10,13 @@ class FairDetector:
     def __init__(self, detector):
         self.detector = detector
         self.condition, self.queue = Condition(), deque()
-        self.high_water, self.rejected = 0, 0
+        self.high_water, self.rejected, self.refreshed = 0, 0, 0
 
     def __getattr__(self, name):
         return getattr(self.detector, name)
 
-    def detect(self, jpeg):
+    @contextmanager
+    def _turn(self):
         queued_at = time.perf_counter()
         ticket, deadline = object(), time.monotonic() + 2
         with self.condition:
@@ -29,19 +31,35 @@ class FairDetector:
                     self.queue.remove(ticket)
                     self.rejected += 1
                     self.condition.notify_all()
-                    self.condition.notify_all()
                     raise BlockingIOError('Antrean analisis melewati batas waktu; frame dilewati')
                 self.condition.wait(remaining)
         try:
             waited = (time.perf_counter()-queued_at)*1000
-            result = self.detector.detect(jpeg)
-            result['scheduler_queue_ms'] = round(waited,2)
-            return result
+            yield waited
         finally:
             with self.condition:
                 self.queue.popleft()
                 self.condition.notify_all()
 
+    def detect(self, jpeg):
+        with self._turn() as waited:
+            result = self.detector.detect(jpeg)
+            result['scheduler_queue_ms'] = round(waited,2)
+            return result
+
+    def detect_latest(self, item, refresh, max_age_seconds):
+        """Select again AFTER waiting for the model. Never infer an old backlog."""
+        with self._turn() as waited:
+            newer = refresh()
+            if newer and not newer.get('error') and newer['monotonic_ns'] > item['monotonic_ns']:
+                item = newer
+                self.refreshed += 1
+            if time.perf_counter_ns()-item['monotonic_ns'] > max_age_seconds*1e9:
+                raise ValueError('Frame stale setelah antrean; menunggu frame terbaru')
+            result = self.detector.detect(item['jpeg'])
+            result['scheduler_queue_ms'] = round(waited,2)
+            return result,item
+
     def scheduling_snapshot(self):
         with self.condition:
-            return {'capacity':18,'pending':len(self.queue),'high_water':self.high_water,'rejected':self.rejected}
+            return {'capacity':18,'pending':len(self.queue),'high_water':self.high_water,'rejected':self.rejected,'refreshed_frames':self.refreshed}

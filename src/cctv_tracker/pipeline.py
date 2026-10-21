@@ -15,7 +15,7 @@ class Pipeline:
         if not settings.zones:
             raise ValueError("At least one calibrated zone is required")
         self.settings, self.database, self.start, self.last_utc = settings, database, start, start
-        self.tracker = Tracker(settings.inference_fps, settings.rules.max_evidence_gap_seconds)
+        self.tracker = Tracker(settings.inference_fps, settings.rules.max_evidence_gap_seconds,settings.track_recovery_seconds)
         self.accumulators = {z.id: ZoneAccumulator(start, settings.rules) for z in settings.zones}
         self.lease = EngineLease(database.path)
         try:

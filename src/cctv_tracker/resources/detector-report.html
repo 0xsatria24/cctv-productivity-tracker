@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="id"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'">
+<title>CCTV | Detector comparison</title>
+<style>
+:root{font:14px system-ui;color-scheme:dark;color:#e3e8ef;background:#14171c}*{box-sizing:border-box}body{margin:0;padding:24px;max-width:1600px}h1{font-size:22px;margin:0 0 10px}h2{font-size:17px;margin:0 0 12px}p{line-height:1.6;color:#b9c4d1;margin:6px 0 16px}.notice{border:1px solid #ad8b48;background:#262319;padding:12px;color:#e5ce9e;margin-bottom:18px}.toolbar{display:flex;align-items:end;gap:14px;flex-wrap:wrap;margin-bottom:18px}label{display:grid;gap:6px}label.check{display:flex;gap:8px;align-items:center}select,button{font:inherit;padding:8px;border:1px solid #647184;background:#242b35;color:inherit;border-radius:4px}button{cursor:pointer}button:disabled{opacity:.4;cursor:default}button:hover:enabled{background:#354153}table{border-collapse:collapse;width:100%;margin-bottom:20px}td,th{padding:10px;text-align:left;border-bottom:1px solid #363d48;white-space:nowrap}th{color:#aebaca;font-weight:500}.scroll{overflow:auto}.layout{display:grid;grid-template-columns:minmax(400px,900px) minmax(250px,1fr);gap:18px}.panel{border:1px solid #363d48;padding:14px;min-width:0}svg{width:100%;height:auto;background:#080a0d}#list{display:grid;gap:6px;max-height:620px;overflow:auto}#list button{text-align:left}.selected{border-color:#81c8bd;background:#24423e}.meta{color:#aebaca;font-variant-numeric:tabular-nums}.legend{display:flex;gap:18px;margin:10px 0}.gt{color:#81c8bd}.pred{color:#8fc0ef}.fp{color:#f1a98f}.nav{display:flex;gap:12px;align-items:center;margin-bottom:12px}#empty{padding:30px;display:none}#notes{font-size:13px}.small{font-size:12px}@media(max-width:950px){body{padding:14px}.layout{grid-template-columns:1fr}}
+</style>
+<h1>Detector comparison</h1>
+<div class="notice" id="notice"></div>
+<p id="basis"></p>
+<div class="toolbar">
+<label>Detector<select id="model"></select></label>
+<label>Confidence<select id="threshold"></select></label>
+<label>Kondisi<select id="scenario"><option value="all">Semua kondisi</option></select></label>
+<label class="check"><input id="errorsOnly" type="checkbox">Hanya frame bermasalah</label>
+<label class="check"><input id="showGt" type="checkbox" checked>Tampilkan label</label>
+<label class="check"><input id="showPred" type="checkbox" checked>Tampilkan prediksi</label>
+</div>
+<div class="scroll"><table><thead><tr><th>Detector</th><th>TP</th><th>FP</th><th>FN</th><th>Precision</th><th>Recall</th><th>F1</th><th>Image call P50</th><th>Image call P95</th></tr></thead><tbody id="metrics"></tbody></table></div>
+<p id="sizeStats"></p>
+<div class="layout"><section class="panel"><div class="nav"><button id="previous">Sebelumnya</button><span id="position"></span><button id="next">Berikutnya</button></div><div id="empty">Tidak ada frame yang cocok dengan filter.</div><svg id="viewer" viewBox="0 0 640 480" aria-label="Perbandingan box label dan prediksi"></svg><div class="legend"><span class="gt">Hijau: label referensi</span><span class="pred">Biru: prediksi cocok</span><span class="fp">Oranye: false positive</span></div><p id="detail" class="meta"></p><p id="comment"></p></section><aside class="panel"><h2>Frame review</h2><div id="list"></div></aside></div>
+<p id="notes"></p>
+<script id="data" type="application/json">__REPORT_JSON__</script>
+<script>
+'use strict';
+const {report,frames}=JSON.parse(document.getElementById('data').textContent),$=id=>document.getElementById(id),ns='http://www.w3.org/2000/svg';
+let current=0;
+const variant=model=>model.variants.find(v=>v.confidence===Number($('threshold').value));
+const activeModel=()=>report.models.find(m=>m.name===$('model').value);
+const percent=value=>value===null||value===undefined?'n/a':(value*100).toFixed(1)+'%';
+const milliseconds=value=>value===null||value===undefined?'n/a':value.toFixed(1)+' ms';
+for(const model of report.models){const option=document.createElement('option');option.value=model.name;option.textContent=model.name;$('model').append(option);}
+for(const value of report.models[0]?.variants.map(v=>v.confidence)||[]){const option=document.createElement('option');option.value=value;option.textContent=value.toFixed(2);$('threshold').append(option);}
+if([...$('threshold').options].some(o=>o.value==='0.45'))$('threshold').value='0.45';
+const conditions=[...new Set(frames.flatMap(f=>f.truth.scenarios))].sort();
+for(const value of conditions){const option=document.createElement('option');option.value=value;option.textContent=value;$('scenario').append(option);}
+$('notice').textContent=`${report.reviewed_frames} frame reviewed | asal label: ${Object.entries(report.label_sources).map(([s,n])=>s+' '+n).join(', ')||'belum tersedia'}. Diagnostik pilot; human review dan data held-out masih diperlukan. Pengaturan live tidak berubah.`;
+$('basis').textContent=`Precision/recall/F1 pada IoU ${report.iou}. Dataset split: ${report.split}. Image-call latency adalah pengukuran offline, bukan FPS kamera. Perbandingan runtime dengan bobot YOLOX sama tidak mengukur keunggulan arsitektur model.`;
+$('notes').textContent='Status threshold: '+report.threshold_proposal.state+'. '+report.limitations.join(' ');
+function filtered(){const active=variant(activeModel()),errors=new Map((active?.errors||[]).map(r=>[r.key,r]));return frames.filter(f=>($('scenario').value==='all'||f.truth.scenarios.includes($('scenario').value))&&(!$('errorsOnly').checked||((errors.get(f.key)?.fn||0)+(errors.get(f.key)?.fp||0)>0)));}
+function svgElement(tag,attributes={}){const element=document.createElementNS(ns,tag);for(const [k,v]of Object.entries(attributes))element.setAttribute(k,String(v));return element;}
+function addBox(box,text,color,width,height,dashed=false){const [a,b,c,d]=box;const rect=svgElement('rect',{x:a*width,y:b*height,width:(c-a)*width,height:(d-b)*height,fill:'none',stroke:color,'stroke-width':1.5,'vector-effect':'non-scaling-stroke'});if(dashed)rect.setAttribute('stroke-dasharray','5 3');$('viewer').append(rect);const label=svgElement('text',{x:a*width+2,y:Math.min(height-3,b*height+11),fill:color,'font-size':10,'paint-order':'stroke','stroke':'#080a0d','stroke-width':2});label.textContent=text;$('viewer').append(label);}
+function draw(list){const frame=list[current];$('viewer').replaceChildren();$('empty').style.display=frame?'none':'block';$('viewer').style.display=frame?'block':'none';$('previous').disabled=current<=0;$('next').disabled=current>=list.length-1;$('position').textContent=list.length?`${current+1} / ${list.length}`:'0 / 0';if(!frame){$('detail').textContent='';$('comment').textContent='';return;}const active=variant(activeModel()),error=active?.errors?.find(r=>r.key===frame.key);$('viewer').setAttribute('viewBox',`0 0 ${frame.width} ${frame.height}`);$('viewer').append(svgElement('image',{href:frame.image_data,width:frame.width,height:frame.height}));if($('showGt').checked)frame.truth.persons.forEach((p,i)=>addBox(p.box,'GT '+(i+1),'#81c8bd',frame.width,frame.height,error?.missed_gt.includes(i)));if($('showPred').checked)(error?.detections||[]).forEach((p,i)=>addBox(p.box,p.confidence.toFixed(2),error.false_positive_predictions.includes(i)?'#f1a98f':'#8fc0ef',frame.width,frame.height));$('detail').textContent=`${frame.source_name} | ${frame.seconds.toFixed(3)} s | ${frame.truth.scenarios.join(', ')} | `+(error?`TP ${error.tp}, FP ${error.fp}, FN ${error.fn}`:'Threshold tidak tersedia dari cache ini');$('comment').textContent=frame.truth.comment;}
+function render(){const active=activeModel();if(!active)return;const list=filtered();current=Math.max(0,Math.min(current,list.length-1));$('metrics').replaceChildren();for(const model of report.models){const v=variant(model),group=$('scenario').value==='all'?'overall':'scenario:'+$('scenario').value,m=v?.evaluation?.metrics?.[group];const tr=document.createElement('tr');for(const value of [model.name,...(m?[m.tp,m.fp,m.fn,percent(m.precision),percent(m.recall),percent(m.f1)]:['n/a','n/a','n/a',v?.state||'n/a','n/a','n/a']),milliseconds(model.image_call_ms.p50),milliseconds(model.image_call_ms.p95)]){const td=document.createElement('td');td.textContent=value;tr.append(td);}$('metrics').append(tr);}const sizes=variant(active)?.object_height_recall||{};$('sizeStats').textContent=active.name+' | Recall menurut tinggi box, seluruh sampel: '+Object.entries(sizes).map(([name,s])=>(name==='under_one_third_frame_height'?'Di bawah 1/3 tinggi frame':'Minimal 1/3 tinggi frame')+`: ${s.detected}/${s.persons} (${percent(s.recall)})`).join('; ');$('list').replaceChildren();const errors=new Map((variant(active)?.errors||[]).map(r=>[r.key,r]));list.forEach((f,i)=>{const button=document.createElement('button'),e=errors.get(f.key);button.textContent=`${f.source_name} ${f.seconds.toFixed(1)}s`+(e?` | FN ${e.fn}, FP ${e.fp}`:' | cache floor');button.className=i===current?'selected':'';button.onclick=()=>{current=i;render();};$('list').append(button);});draw(list);}
+for(const id of ['model','threshold','scenario','errorsOnly'])$(id).onchange=()=>{current=0;render();};
+for(const id of ['showGt','showPred'])$(id).onchange=()=>draw(filtered());
+$('previous').onclick=()=>{current--;render();};$('next').onclick=()=>{current++;render();};
+render();
+</script></html>

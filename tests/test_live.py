@@ -65,6 +65,25 @@ def test_calibration_validation_and_camera_binding(live):
     assert loaded.snapshot()['calibrations']['WEBCAM_LIVE']['revision'] == 1
 
 
+def test_predicted_display_box_never_enters_measured_counts_or_zone_evidence(live):
+    controller,detector=live
+    session=controller.start('WEBCAM_LIVE',camera_key='a'*64)['session_id']
+    wait_for(lambda:controller.snapshot()['status']=='RUNNING')
+    controller.submit(b'fixture',session,1)
+    time.sleep(.15)
+    occupied=controller.submit(b'fixture',session,2)
+    assert occupied['zones'][0]['state']=='OCCUPIED'
+    detector.rows=[]
+    time.sleep(.15)
+    missing=controller.submit(b'fixture',session,3)
+    assert missing['count']==0 and missing['detections']==[]
+    assert len(missing['display_predictions'])==1
+    time.sleep(.15)
+    empty=controller.submit(b'fixture',session,4)
+    assert empty['count']==0 and empty['zones'][0]['state']=='EMPTY'
+    assert empty['display_predictions'][0]['activity']['label'] is None
+
+
 def test_live_tracking_durations_gap_duplicate_stop_and_database_isolation(live):
     controller, detector = live
     session = controller.start('WEBCAM_LIVE', camera_key='a' * 64)['session_id']

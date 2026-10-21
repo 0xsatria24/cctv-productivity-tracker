@@ -41,6 +41,7 @@ def _latest(mailbox, item):
 def capture_worker(url, mailbox, stop, open_timeout, read_timeout, capture_fps=24, native_threads=1):
     import av
     import cv2
+    from .frame_image import encode_frame
     cv2.setNumThreads(native_threads)
     # Native FFmpeg diagnostics may include credentials. Return only fixed errors.
     av.logging.set_level(av.logging.PANIC)
@@ -50,11 +51,14 @@ def capture_worker(url, mailbox, stop, open_timeout, read_timeout, capture_fps=2
             if not container.streams.video:
                 raise ValueError('No video')
             container.streams.video[0].codec_context.thread_count = native_threads
-            previous_pts, sampled, decoded, encoded_count = None, 0.0, 0, 0
+            previous_pts, sampled, decoded, encoded_count, corrupt_dropped = None, 0.0, 0, 0, 0
             for frame in container.decode(video=0):
                 if stop.is_set():
                     break
                 decoded += 1
+                if frame.is_corrupt:
+                    corrupt_dropped += 1
+                    continue  # Damaged decoded pixels are not observation evidence.
                 # Repeated source PTS is not new evidence. A backwards PTS starts a generation.
                 if frame.pts is not None and previous_pts is not None:
                     if frame.pts == previous_pts:
@@ -66,17 +70,11 @@ def capture_worker(url, mailbox, stop, open_timeout, read_timeout, capture_fps=2
                 if int(captured / 1e9 * capture_fps) <= sampled:
                     continue
                 sampled = int(captured / 1e9 * capture_fps)
-                if frame.width * frame.height > 4096 * 2160:
-                    raise ValueError('Unsupported frame size')
-                width = max(1, round(frame.width * min(1, 640 / max(frame.width, frame.height))))
-                height = max(1, round(frame.height * min(1, 640 / max(frame.width, frame.height))))
-                image = frame.reformat(width=width, height=height, format='bgr24').to_ndarray()
-                success, encoded = cv2.imencode('.jpg', image, [cv2.IMWRITE_JPEG_QUALITY, 75])
-                if success:
-                    encoded_count += 1
-                    _latest(mailbox, {'jpeg': encoded.tobytes(), 'monotonic_ns': captured, 'generation': generation,
-                                     'capture_metrics':{'decoded':decoded,'sampled':encoded_count,'sample_skipped':decoded-encoded_count},
-                                     'source_pts_ns':round(float(frame.time)*1e9) if frame.time is not None else None})
+                jpeg, _, _ = encode_frame(frame)
+                encoded_count += 1
+                _latest(mailbox, {'jpeg': jpeg, 'monotonic_ns': captured, 'generation': generation,
+                                 'capture_metrics':{'decoded':decoded,'sampled':encoded_count,'sample_skipped':decoded-encoded_count-corrupt_dropped,'corrupt_dropped':corrupt_dropped},
+                                 'source_pts_ns':round(float(frame.time)*1e9) if frame.time is not None else None})
     except Exception:
         _latest(mailbox, {'error': 'RTSP tidak dapat dibaca; periksa jaringan, URL, kredensial dan codec'})
     finally:

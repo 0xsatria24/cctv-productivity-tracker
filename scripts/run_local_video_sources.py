@@ -24,11 +24,12 @@ def publish(path, url, stop, failures):
             stream.bit_rate = 900_000
             stream.options = {'preset': 'ultrafast', 'tune': 'zerolatency', 'g': '24', 'bf': '0'}
             index = 0
-            deadline = time.perf_counter()
+            started = time.perf_counter()
             while not stop.is_set():
                 with av.open(str(path)) as source:
                     origin = None
                     last_sample = -1
+                    loop_base = index
                     for frame in source.decode(video=0):
                         if stop.is_set():
                             break
@@ -39,14 +40,16 @@ def publish(path, url, stop, failures):
                         if sample <= last_sample:
                             continue
                         last_sample = sample
-                        if stop.wait(max(0, deadline - time.perf_counter())):
+                        if frame.is_corrupt:
+                            continue
+                        index = loop_base + sample
+                        if stop.wait(max(0, started + index/float(rate) - time.perf_counter())):
                             break
                         frame = frame.reformat(width=width, height=height, format='yuv420p')
                         frame.pts, frame.time_base = index, 1 / rate
                         for packet in stream.encode(frame):
                             output.mux(packet)
                         index += 1
-                        deadline += float(1 / rate)
             for packet in stream.encode():
                 output.mux(packet)
     except Exception as error:

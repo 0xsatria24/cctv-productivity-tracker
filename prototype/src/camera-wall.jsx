@@ -6,7 +6,7 @@ import { WebcamPanel } from './webcam';
 import { CAMERA_MODES, cameraView } from './camera-layout.mjs';
 import './camera-wall.css';
 import { ManagedCameraControls } from './managed-camera';
-import { TrackCaption } from './track-caption';
+import { TrackCaption, PredictedTrack } from './track-caption';
 
 const LAYOUTS = [1, 4, 9, 16];
 const HEALTH = { ONLINE: 'Live', CONNECTING: 'Menghubungkan', RECONNECTING: 'Menghubungkan ulang', STALLED: 'Frame terhenti', PAUSED: 'Preview dijeda', OFFLINE: 'Tidak terhubung' };
@@ -113,7 +113,8 @@ function RtspTile({ camera, visible, onFocus, latest, zones = [], showDetections
         // Subtract the full request time conservatively; never renew an old
         // result indefinitely just because the HTTP endpoint still responds.
         const remaining = packet.valid_for_ms - (performance.now() - started);
-        setAnalysis(remaining > 0 && packet.observation ? {...packet.observation,presentation_age_ms:packet.source_age_ms || 0} : null);
+        setAnalysis(remaining > 0 && packet.observation ? {...packet.observation,presentation_age_ms:packet.source_age_ms || 0,
+          display_predictions:packet.observation.display_predictions?.map(row=>({...row,valid_for_ms:row.valid_for_ms-(performance.now()-started)}))} : null);
         if (remaining > 0) expiry = setTimeout(() => setAnalysis(null), remaining);
       } catch { /* Keep the previous measured result only until its expiry. */ }
       finally { if (!abort.signal.aborted) timer = setTimeout(poll, Math.max(0, 200 - (performance.now() - started))); }
@@ -136,6 +137,7 @@ function RtspTile({ camera, visible, onFocus, latest, zones = [], showDetections
               <TrackCaption row={row} width={dimensions.width} height={dimensions.height} fontSize={Math.max(8,8*dimensions.width/Math.max(1,bounds.width))} ageMs={detection.presentation_age_ms}/>
             </g>;
           })}
+          {showDetections && detection?.display_predictions?.map(row => <PredictedTrack key={row.track_id} row={row} width={dimensions.width} height={dimensions.height} fontSize={Math.max(8,8*dimensions.width/Math.max(1,bounds.width))} ageMs={detection.presentation_age_ms}/>)}
         </svg>}</>
         : <div className="camera-no-signal"><Camera size={24} aria-hidden="true"/><strong>{HEALTH[health] || 'Menunggu gambar'}</strong><p>{camera.error || 'Gambar muncul setelah koneksi kamera tersedia.'}</p></div>}
     </div>
@@ -237,7 +239,7 @@ export function CameraWorkspace({ webcam, live, engine, page, onHealthChange }) 
     <div className="camera-selection-bar"><div><span>KAMERA DIPILIH</span><strong>{selectedCamera?.name || 'Pilih kamera'}</strong></div><p>{selectedCamera?.id === 'webcam' ? 'Analisis orang tersedia dari webcam. Kalibrasikan zona untuk mencatat durasi.' : selectedCamera?.analysis ? 'Sumber ini sedang diproses oleh engine live.' : 'Sumber ini menayangkan preview. Deteksi dan pencatatan belum diaktifkan untuk kamera ini.'}</p><Button disabled={!selectedCamera} onClick={() => focusCamera(selected)}>Fokus kamera</Button><Button disabled={!selectedCamera || hidden.includes(selected)} onClick={() => setHidden(h => [...h, selected])}>Sembunyikan dari grid</Button></div>
     {(notice || registry.error) && <p className="camera-wall-notice" role="status">{notice || `Daftar RTSP belum tersedia: ${registry.error}`}</p>}
     {selectedCamera?.managed && <ManagedCameraControls key={selectedCamera.id} camera={selectedCamera} engine={engine}/>}
-    <p className="camera-analysis-note">Working / Idle adalah indikator gerak visual; diam belum membuktikan istirahat. Durasi pada box adalah usia track, bukan durasi produktif. Pilih kamera untuk mengatur zona dan memulai analisis. Analisis RTSP tetap berjalan saat pindah halaman; kapasitas bergantung pada perangkat dan kelengkapan observasi.</p>
+    <p className="camera-analysis-note">Garis putus menunjukkan posisi perkiraan maksimal satu detik, bukan deteksi baru. Working / Idle adalah indikator gerak visual; diam belum membuktikan istirahat. Durasi pada box adalah usia track, bukan durasi produktif. Pilih kamera untuk mengatur zona dan memulai analisis. Analisis RTSP tetap berjalan saat pindah halaman; kapasitas bergantung pada perangkat dan kelengkapan observasi.</p>
     {dialog?.type === 'add' && <AddCameraDialog onClose={() => setDialog(null)} onSave={async (name, url) => { const camera = await registry.add(name, url); setDialog(null); setHidden(h => h.filter(id => id !== camera.id)); setSelected(camera.id); setFocusPage(0); setGridPage(Math.floor(enabled.length / prefs.layout)); }}/>}
     {dialog?.type === 'remove' && <RemoveCameraDialog camera={dialog.camera} onClose={() => setDialog(null)} onRemove={() => removeCamera(dialog.camera.id)}/>}
   </section>;

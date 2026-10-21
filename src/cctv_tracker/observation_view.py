@@ -10,6 +10,10 @@ def observation_view(pair, now_ns):
     # Bound both camera evidence age and time since the last completed result.
     remaining = max(0, min(3000 - source_age, 1500 - result_age))
     observation = pair.get('observation') if remaining > 0 else None
+    if observation and observation.get('display_predictions'):
+        observation={**observation,'display_predictions':[
+            {**row,'valid_for_ms':round(row['valid_for_ms']-source_age)}
+            for row in observation['display_predictions'] if row['valid_for_ms']>source_age]}
     return {'observation': observation, 'sequence': pair['sequence'], 'utc_ms': pair['utc_ms'],
             'source_age_ms': round(source_age), 'result_age_ms': round(result_age),
             'valid_for_ms': round(remaining) if observation is not None else 0}

@@ -65,6 +65,8 @@ class Settings:
     activity_idle_seconds: float = 8
     activity_working_seconds: float = .8
     box_smoothing_ms: float = 80
+    track_recovery_seconds: float = 1
+    display_prediction_seconds: float = 1
     frame_stale_seconds: float = 1
     open_timeout_seconds: float = 10
     read_timeout_seconds: float = 5
@@ -85,6 +87,8 @@ class Settings:
             raise ValueError('Invalid adaptive/activity configuration')
         if not all(math.isfinite(v) for v in (self.activity_idle_seconds,self.activity_working_seconds,self.box_smoothing_ms)) or not 2 <= self.activity_idle_seconds <= 120 or not .2 <= self.activity_working_seconds <= 10 or not 0 <= self.box_smoothing_ms <= 200:
             raise ValueError('Invalid motion confirmation or box smoothing settings')
+        if any(not math.isfinite(v) or not 0 <= v <= 1 for v in (self.track_recovery_seconds,self.display_prediction_seconds)):
+            raise ValueError('Tracking recovery and display prediction must be 0..1 seconds')
         if any(not math.isfinite(v) or v <= 0 for v in (self.frame_stale_seconds, self.open_timeout_seconds, self.read_timeout_seconds)):
             raise ValueError("Timeouts must be positive and finite")
         if len({z.id for z in self.zones}) != len(self.zones):

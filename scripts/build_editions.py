@@ -33,7 +33,7 @@ dependencies = ["tzdata==2025.2"]
 [tool.setuptools.packages.find]
 where = ["src"]
 [tool.setuptools.package-data]
-cctv_tracker = ["resources/*.sql", "resources/*.json"]
+cctv_tracker = ["resources/*.sql", "resources/*.json", "resources/*.html"]
 "editions.headless" = ["*.html"]
 '''
         (stage / 'pyproject.toml').write_text(project)

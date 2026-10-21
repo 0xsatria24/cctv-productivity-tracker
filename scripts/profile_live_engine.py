@@ -76,6 +76,8 @@ def main():
                    'preview_sequence':int(image.headers.get('X-Frame-Sequence',0)),
                    'sequence':packet.get('sequence'), 'performance':state.get('performance'),
                    'activity':[{'id':d.get('track_id'),**d.get('activity',{})} for d in (measured or {}).get('detections',[])],
+                   'measured_boxes':len((measured or {}).get('detections',[])),
+                   'predicted_tracks':[d['track_id'] for d in (measured or {}).get('display_predictions',[])],
                    'tracks':[d['track_id'] for d in (measured or {}).get('detections',[]) if d.get('track_id')]}
             if measured and packet.get('sequence') != timings.get(cid,{}).get('last_sequence'):
                 timing = timings.setdefault(cid, {'last_sequence':None,'latency_ms':[]})

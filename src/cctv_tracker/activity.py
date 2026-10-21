@@ -122,6 +122,9 @@ class TrackActivity:
             center = ((box[0]+box[2])/2,(box[1]+box[3])/2)
             velocity = math.dist(center,old_center)/max(.001,dt)/max(.02,box[3]-box[1]) if dt else 0
             alpha = 1 if velocity > .5 or dt <= 0 or not self.smoothing_seconds else 1-math.exp(-dt/self.smoothing_seconds)
+            size_change=max(abs((box[2]-box[0])-(state.box[2]-state.box[0])),abs((box[3]-box[1])-(state.box[3]-state.box[1])))
+            if self.smoothing_seconds and 0<dt<=1 and velocity<.05 and size_change<.02*max(.02,box[3]-box[1]):
+                alpha=min(alpha,.5)  # Suppress tiny static jitter even at a low processed FPS.
             state.display_box = tuple(a+(b-a)*alpha for a,b in zip(state.display_box,box))
             state.box, state.last = box, at
             row['display_box'] = state.display_box

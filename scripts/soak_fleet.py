@@ -72,8 +72,8 @@ def main():
     parser.add_argument('--max-disk-mb', type=float, default=4096)
     parser.add_argument('--fault-every', type=float, default=900)
     args = parser.parse_args()
-    if not 10 <= args.seconds <= 172800 or args.fault_every < 10:
-        parser.error('duration must be 10..172800 seconds; fault interval >=10 seconds')
+    if not 10 <= args.seconds <= 259200 or args.fault_every < 10:
+        parser.error('duration must be 10..259200 seconds; fault interval >=10 seconds')
     args.output.mkdir(parents=True, exist_ok=False)
     if args.detector == 'fixture':
         detector = FixtureDetector()

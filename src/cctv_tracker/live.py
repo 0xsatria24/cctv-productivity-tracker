@@ -172,8 +172,10 @@ class LiveController:
     def _run(self, config, profile, source, session, url, preview_only):
         from .activity import TrackActivity
         from .performance import Performance, AdaptiveRate, SystemLoad
+        from .display_tracks import DisplayTracks
         activity = TrackActivity(config.rules.max_evidence_gap_seconds, config.activity_idle_seconds, config.activity_working_seconds, config.box_smoothing_ms, enabled=config.activity_enabled)
         performance = Performance()
+        display_tracks = DisplayTracks(config.display_prediction_seconds)
         rate = AdaptiveRate(config.inference_fps,config.minimum_inference_fps,config.adaptive_inference)
         resources = SystemLoad() if config.adaptive_inference else None
         pipeline, capture, db = None, None, None
@@ -248,7 +250,12 @@ class LiveController:
                                 continue
                             last_rate_tick = tick
                         started = time.perf_counter_ns()
-                        result = self.detector.detect(item['jpeg'])
+                        select_latest = getattr(self.detector,'detect_latest',None)
+                        if source == 'RTSP_LIVE' and select_latest:
+                            result,item = select_latest(item,lambda:capture.read(timeout=0),config.frame_stale_seconds)
+                            generation,mono = item['generation'],item['monotonic_ns']
+                        else:
+                            result = self.detector.detect(item['jpeg'])
                         inferred = time.perf_counter_ns()
                         if not preview_only and abs(result['width'] / result['height'] - profile['width'] / profile['height']) > 0.02:
                             raise ValueError('Rasio frame berubah. Hentikan sesi dan kalibrasikan ulang zona')
@@ -261,12 +268,13 @@ class LiveController:
                         result['detections'] = [d for d in result['detections'] if d.get('track_id') is not None or d['confidence'] >= 0.45]
                         accounted = time.perf_counter_ns()
                         activity.annotate(item['jpeg'],result['detections'],mono,generation,accounting.get('retained_track_ids'))
+                        result['display_predictions'] = display_tracks.update(result['detections'],mono,generation,accounting.get('retained_track_ids',()))
                         result['count'] = len(result['detections'])
                         completed = time.perf_counter_ns()
                         performance.record(capture_to_result_ms=(completed-mono)/1e6,
                             scheduler_queue_ms=result.get('scheduler_queue_ms',0),detector_ms=(inferred-started)/1e6,
                             accounting_ms=(accounted-inferred)/1e6,activity_ms=(completed-accounted)/1e6,
-                            frame_age_ms=(started-mono)/1e6,preprocess_ms=result.get('preprocess_ms'),
+                            frame_age_ms=max(0,(started-mono)/1e6),preprocess_ms=result.get('preprocess_ms'),
                             runtime_ms=result.get('runtime_ms'),postprocess_ms=result.get('postprocess_ms'))
                         resource_values = resources.sample() if resources else {}
                         rate.observe((completed-started)/1e9,time.perf_counter(),**resource_values)

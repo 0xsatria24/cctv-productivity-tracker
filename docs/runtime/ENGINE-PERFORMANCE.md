@@ -1,5 +1,7 @@
 # Engine audit, display timer and visible activity
 
+The later factory-video findings, frame reselection, conservative weak-track recovery and bounded display predictions are documented in [WORKER-BOX-STABILITY.md](WORKER-BOX-STABILITY.md).
+
 ## Architecture audited
 
 The working pipeline remains Python, PyAV/FFmpeg RTSP capture, OpenCV JPEG/preprocessing, the existing YOLOX-S model with ONNX Runtime or OpenVINO, ByteTrack, zone association, transactional SQLite accounting and the React dashboard. No replacement model, re-identification network, microservice or GUI dependency was added to the inference process.
@@ -83,3 +85,7 @@ Install development measurement dependencies with `python -m pip install -e ".[p
 Regression coverage includes timer continuity without zone visits, weak confidence, Working/Idle hysteresis, camera translation, featureless frames, short occlusion, generation changes, fast movement, static-box jitter, bounded performance buffers, adaptive cooldown/disable, one model per Headless service, one capture per managed camera, subscriber ownership, timestamp anchors, stream outage/recovery, final committed intervals and browser navigation/expiry/archive behavior.
 
 The short replay soak is not a 24-hour leak/stability certification. Sustained production operation, real network-jitter distributions, target i3/N-series hardware, low-light detection accuracy, annotated IDF1/HOTA and industrial action/rest classification still need the corresponding hardware and labelled footage. No ID-switch, accuracy or commercial-readiness result is invented from anonymous-ID counts or synthetic tests.
+
+## Sequential production readiness
+
+See [PRODUCTION-READINESS.md](PRODUCTION-READINESS.md) for the dataset/evaluation workflow, current release gates and the manually launched 24/72-hour test program. Creating the test program does not mean a long test has run.

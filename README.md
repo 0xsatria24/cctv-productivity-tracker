@@ -42,6 +42,8 @@ Set-Location -LiteralPath 'C:\Users\muham\OneDrive\Documents\ChatGPT\cctv 2'
 | [SQL reference](docs/database/001_initial.sql) | Skema executable dengan constraints/indexes/views |
 | [Observation contract](docs/contracts/zone-observation.schema.json) | Input typed domain tanpa frame/secret |
 | [Implementation Plan](docs/IMPLEMENTATION-PLAN.md) | Milestones, traceability dan validation gates |
+| [Production readiness](docs/runtime/PRODUCTION-READINESS.md) | Dataset review, evaluasi akurasi dan program uji 24/72 jam manual |
+| [Detector evaluation](docs/runtime/DETECTOR-EVALUATION.md) | Hasil perbandingan model, confidence sweep dan review miss/false positive |
 | [Validation results](docs/validation/RESULTS.md) | Hasil pengujian skema referensi dan static contract checks |
 | [UI/UX Specification](UI_UX_SPEC.md) | Scope V1, workflow tujuh halaman, state semantics dan interaction |
 | [Design System](DESIGN_SYSTEM.md) | Tokens, typography, contrast, component states dan keyboard |

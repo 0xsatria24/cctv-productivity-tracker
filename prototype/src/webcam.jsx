@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { TrackCaption } from './track-caption';
+import { TrackCaption, PredictedTrack } from './track-caption';
 import { Maximize, Play, RefreshCw, Settings, Square, Video } from 'lucide-react';
 import { Button, Field, Modal, Panel, Status } from './components';
 
@@ -225,10 +225,11 @@ function WebcamVideo({ webcam }) {
     {webcam.stream ? <video ref={video} autoPlay muted playsInline aria-label="Preview webcam lokal" style={{ objectFit: webcam.fit, transform: webcam.mirror ? 'scaleX(-1)' : undefined }} />
       : <div className="webcam-placeholder"><Video size={28} aria-hidden="true"/><h3>{webcam.status === 'REQUESTING' ? 'Izinkan kamera di browser' : 'Webcam lokal'}</h3><p>{webcam.status === 'CANCELLING' ? 'Tutup atau selesaikan dialog izin. Jika akses diberikan setelah pembatalan, kameranya langsung dihentikan.' : 'Pilih perangkat, lalu klik Mulai webcam. Tidak ada gambar simulasi pada preview ini.'}</p></div>}
     {showDetections && webcam.showDetections !== false && <svg className="webcam-detections" aria-label="Bounding box deteksi orang" viewBox={`0 0 ${analysis.width} ${analysis.height}`} preserveAspectRatio={webcam.fit === 'cover' ? 'xMidYMid slice' : 'xMidYMid meet'}>{analysis.detections.map((d, i) => {
-      const x = (webcam.mirror ? 1 - d.box[2] : d.box[0]) * analysis.width, y = d.box[1] * analysis.height;
-      const width = (d.box[2] - d.box[0]) * analysis.width, height = (d.box[3] - d.box[1]) * analysis.height;
+      const box=d.display_box || d.box;
+      const x = (webcam.mirror ? 1 - box[2] : box[0]) * analysis.width, y = box[1] * analysis.height;
+      const width = (box[2] - box[0]) * analysis.width, height = (box[3] - box[1]) * analysis.height;
       return <g key={d.track_id || i}><rect x={x} y={y} width={width} height={height} className="person-box"/><TrackCaption row={d} width={analysis.width} height={analysis.height} mirror={webcam.mirror}/></g>;
-    })}</svg>}
+    })}{analysis.display_predictions?.map(row=><PredictedTrack key={row.track_id} row={row} width={analysis.width} height={analysis.height} mirror={webcam.mirror}/>)}</svg>}
     {webcam.stream && webcam.calibration && webcam.showZones !== false && <svg className="webcam-detections" viewBox={`0 0 ${webcam.width || 640} ${webcam.height || 480}`} preserveAspectRatio={webcam.fit === 'cover' ? 'xMidYMid slice' : 'xMidYMid meet'} aria-label="Zona kalibrasi webcam">{webcam.calibration.zones.map(zone => <polygon key={zone.id} points={zone.polygon.map(([x, y]) => `${(webcam.mirror ? 1 - x : x) * (webcam.width || 640)},${y * (webcam.height || 480)}`).join(' ')} className="zone-overlay"/>)}</svg>}
     {webcam.stream && <div className="webcam-video-tools"><span>{webcam.status === 'LIVE' ? 'WEBCAM LIVE' : LABELS[webcam.status]}</span><div className="inline-controls"><Button icon={Square} aria-label="Hentikan webcam dari preview" onClick={webcam.stop}>Hentikan</Button>{document.fullscreenEnabled && <Button icon={Maximize} aria-label={fullscreen ? 'Keluar layar penuh webcam' : 'Layar penuh webcam'} onClick={() => (fullscreen ? document.exitFullscreen() : container.current.requestFullscreen()).catch(() => setNotice('Layar penuh tidak tersedia dalam browser ini.'))}>{fullscreen ? 'Keluar layar penuh' : 'Layar penuh'}</Button>}</div></div>}
     {notice && <p className="webcam-fullscreen-notice" role="status">{notice}</p>}
