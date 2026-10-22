@@ -148,6 +148,63 @@ def test_inference_failure_closes_run_and_keeps_only_committed_evidence(live):
         assert not db.conn.execute('SELECT 1 FROM zone_intervals WHERE end_utc_us IS NULL').fetchone()
 
 
+def test_late_inference_is_discarded_before_session_rebinding(live, monkeypatch):
+    controller, detector = live
+    configuration = profile()
+    configuration['rules']['max_evidence_gap_seconds'] = 0.5
+    controller.save_calibration('WEBCAM_LIVE', configuration)
+    session = controller.start('WEBCAM_LIVE', camera_key='a' * 64)['session_id']
+    wait_for(lambda: controller.snapshot()['status'] == 'RUNNING')
+    first = controller.submit(b'fixture', session, 1)
+    sid = first['detections'][0]['session_id']
+    original_detect = detector.detect
+
+    def slow_detect(jpeg):
+        time.sleep(0.6)
+        result = original_detect(jpeg)
+        result['detections'] = [{'box': [0.6, 0.1, 0.9, 0.8], 'confidence': 0.95}]
+        return result
+
+    monkeypatch.setattr(detector, 'detect', slow_detect)
+    with pytest.raises(ValueError, match='Inferensi terlalu lambat'):
+        controller.submit(b'slow-fixture', session, 2)
+    assert controller.snapshot()['latest'] is None
+    controller.stop(session)
+    wait_for(lambda: controller.snapshot()['status'] == 'STOPPED')
+    with closing(Database(controller.settings.database)) as db:
+        rows = db.conn.execute('SELECT session_id,accumulated_duration_us FROM person_sessions').fetchall()
+        assert len(rows) == 1 and rows[0]['session_id'] == sid
+        assert rows[0]['accumulated_duration_us'] == 0
+
+
+def test_stop_during_inference_cannot_publish_a_new_mapping(live, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+    controller, detector = live
+    session = controller.start('WEBCAM_LIVE', camera_key='a' * 64)['session_id']
+    wait_for(lambda: controller.snapshot()['status'] == 'RUNNING')
+    original_detect = detector.detect
+    started, release = Event(), Event()
+
+    def delayed(jpeg):
+        started.set()
+        assert release.wait(5)
+        return original_detect(jpeg)
+
+    monkeypatch.setattr(detector, 'detect', delayed)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        result = pool.submit(controller.submit, b'delayed-fixture', session, 1)
+        assert started.wait(5)
+        controller.stop(session)
+        release.set()
+        with pytest.raises(ValueError, match='hasil inferensi diabaikan'):
+            result.result(timeout=5)
+    wait_for(lambda: controller.snapshot()['status'] == 'STOPPED')
+    assert controller.snapshot()['latest'] is None
+    with closing(Database(controller.settings.database)) as db:
+        assert db.conn.execute('SELECT COUNT(*) FROM person_sessions').fetchone()[0] == 0
+
+
 def test_failed_checkpoint_does_not_publish_uncommitted_detections(live, monkeypatch):
     import sqlite3
     from cctv_tracker.persistence import RunWriter

@@ -34,11 +34,13 @@ class Tracker:
         self.last_time = None
         self.generation = None
         self.last_tracks = []
+        self.epoch = 0
 
     def update(self, detections, at_seconds, generation):
         import numpy as np
         if self.generation != generation or (self.last_time is not None and at_seconds - self.last_time > self.gap_seconds):
             self.tracker.reset()
+            self.epoch += 1
             self.last_time = None
         if self.last_time is not None and at_seconds <= self.last_time:
             raise ValueError("Tracker timestamps must advance")
@@ -54,10 +56,12 @@ class Tracker:
         tracked = self.tracker.update_with_detections(inputs)
         result = list(detections)
         self.last_tracks = []
+        used = set()
         for box, confidence, identifier in zip(tracked.xyxy, tracked.confidence, tracked.tracker_id):
-            match = next((i for i, d in enumerate(result) if tuple(box) == tuple(np.asarray(d.box, dtype=np.float32))), None)
+            match = next((i for i, d in enumerate(result) if i not in used and tuple(box) == tuple(np.asarray(d.box, dtype=np.float32))), None)
             if match is not None:
-                track_id = f"{generation}:{int(identifier)}"
+                used.add(match)
+                track_id = f"{generation}:{self.epoch}:{int(identifier)}"
                 result[match] = Detection(result[match].box, float(confidence), track_id)
                 self.last_tracks.append(track_id)
         # Only current measured boxes are returned; predictions never create presence.

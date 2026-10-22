@@ -1,5 +1,6 @@
 """One active live source, one accounting thread, separate live SQLite history."""
 from concurrent.futures import Future
+from collections import deque
 from contextlib import closing
 from dataclasses import asdict, replace
 import copy
@@ -55,6 +56,7 @@ class LiveController:
         self.profiles = {}
         self.last_submitted = 0
         self.preview = None
+        self.preview_history = deque(maxlen=8)
         self.state = {'status': 'IDLE', 'source': None, 'session_id': None, 'run_id': None, 'camera_health': 'OFFLINE', 'processed': 0, 'error': None, 'latest': None}
         with closing(Database(self.settings.database)) as db:
             for row in db.conn.execute('SELECT * FROM live_calibrations'):
@@ -108,12 +110,14 @@ class LiveController:
             if not preview_only and camera_key != profile['camera_key']:
                 raise ValueError('Kamera berbeda dari kalibrasi tersimpan. Kalibrasikan kamera ini terlebih dahulu')
             zones, rules = validate_calibration({k: v for k, v in profile.items() if k != 'revision'}) if profile else ((), Rules(max_evidence_gap_seconds=3))
-            config = replace(self.settings, camera_id=source.lower() + '-primary', zones=zones, rules=rules,
+            camera_id = self.settings.camera_id if self.settings.camera_id != 'camera-1' else source.lower() + '-primary'
+            config = replace(self.settings, camera_id=camera_id, zones=zones, rules=rules,
                              inference_fps=5, frame_stale_seconds=rules.max_evidence_gap_seconds)
             session = str(uuid4())
             self.stop_event.clear()
             self.last_submitted = 0
             self.preview = None
+            self.preview_history.clear()
             self._update(status='STARTING', source=source, session_id=session, run_id=None, camera_health='RECONNECTING', processed=0, error=None, latest=None, preview_only=preview_only, camera_key=camera_key)
             self.thread = Thread(target=self._run, args=(config, profile, source, session, url, preview_only), name='live-occupancy', daemon=False)
             self.thread.start()
@@ -150,11 +154,18 @@ class LiveController:
         return future.result(timeout=10)
 
     def preview_jpeg(self):
+        frame = self.preview_frame()
+        return frame[0] if frame else None
+
+    def preview_frame(self, frame_seq=None, run_id=None):
         with self.lock:
-            value = self.preview
+            value = (next((frame for frame in reversed(self.preview_history)
+                           if frame[2]['X-Frame-Sequence'] == str(frame_seq)
+                           and (run_id is None or frame[2]['X-Run-Id'] == run_id)), None)
+                     if frame_seq is not None else self.preview)
         if not value or time.perf_counter_ns() - value[0] > 3e9:
             return None
-        return value[1]
+        return value[1], value[2]
 
     def _run(self, config, profile, source, session, url, preview_only):
         pipeline, capture, db = None, None, None
@@ -224,12 +235,18 @@ class LiveController:
                             raise ValueError('Rasio frame berubah. Hentikan sesi dan kalibrasikan ulang zona')
                         if time.perf_counter_ns() - mono > config.frame_stale_seconds * 1e9:
                             raise ValueError('Inferensi terlalu lambat; hasil tidak menjadi bukti')
+                        if self.stop_event.is_set():
+                            raise ValueError('Sesi telah berhenti; hasil inferensi diabaikan')
                         accounting = account([Detection(tuple(d['box']), d['confidence']) for d in result['detections']], mono)
                         last_valid = mono / 1e9; attempts = 0
                         result.update(accounting)
                         result.update(source=source, recorded=not preview_only, processed_monotonic_ns=time.perf_counter_ns())
                         with self.lock:
-                            self.preview = (time.perf_counter_ns(), item['jpeg'])
+                            self.preview = (time.perf_counter_ns(), item['jpeg'],
+                                            {'X-Frame-Sequence': str(accounting.get('frame_seq', '')),
+                                             'X-Run-Id': str(accounting.get('run_id', '')),
+                                             'X-Mapping-Version': str(accounting.get('mapping_version', ''))})
+                            self.preview_history.append(self.preview)
                             self.state.update(camera_health='ONLINE', error=None, processed=self.state['processed'] + 1, latest=result)
                         if future and not future.done():
                             future.set_result(result)
@@ -275,5 +292,6 @@ class LiveController:
                     break
             with self.lock:
                 self.preview = None
+                self.preview_history.clear()
                 if self.state['status'] != 'FAILED':
                     self.state.update(status='STOPPED', camera_health='OFFLINE', latest=None)

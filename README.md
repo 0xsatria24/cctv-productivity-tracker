@@ -1,5 +1,7 @@
 # CCTV Productivity Tracker — Design Workspace
 
+Update UI/UX 15 Oktober: halaman Kamera memakai grid CCTV dan setup empat langkah; Ringkasan menampilkan kondisi kamera saat ini; Laporan menyediakan filter tanggal/jam shift, penjelasan kelengkapan, ekspor dan timeline. Sumber laporan awal adalah Kamera live. Rincian teknis berada di Pengaturan. Lihat [perbaikan UI operasional](docs/ui/OPERATIONS-IMPROVEMENTS.md).
+
 Edisi tambahan **CCTV Headless Engine** tersedia tanpa frontend, dengan API multi-kamera, WebSocket, webhook, dan lisensi offline bertanda tangan. Panduan instalasi, konfigurasi, kontrak API, serta batas validasi: [Headless Engine](docs/runtime/HEADLESS.md). Jalankan `python -m editions.headless --help`; paket Enterprise dan Headless dibuat terpisah dengan `python scripts/build_editions.py`. Kedua edisi menggunakan engine yang sama.
 
 Status: dashboard React sudah terhubung ke engine Python melalui API lokal dan SQLite. Satu server menyajikan UI dan API; replay dapat dimulai/dihentikan dari dashboard. Preview beberapa kamera tersedia dalam grid 1/4/9/16. Tracking, zona dan durasi live masih satu sumber aktif; native GUI, inferensi banyak kamera dan acceptance produksi belum selesai.
@@ -16,7 +18,7 @@ Untuk uji webcam, buka halaman **Kamera**, pilih perangkat, klik **Mulai webcam*
 
 Stack V1: Python, PySide6/PyQtGraph, PyAV/FFmpeg, OpenCV/NumPy, ONNX Runtime, SQLite, FastAPI/Uvicorn lokal.
 
-Halaman **Kamera** dan **Pemantauan Live** memakai grid CCTV dengan daftar/pencarian kamera, fokus, fullscreen dan preview RTSP independen. Pengaturan webcam dibuka dari ikon pengaturan pada tile. Aktifkan **Deteksi** untuk menampilkan bounding box. Tambahan kamera RTSP berlabel **Preview saja**; koneksinya tersedia selama proses aplikasi berjalan. Lihat [panduan camera wall](docs/runtime/CAMERA-WALL.md).
+Halaman **Pemantauan Live** menyediakan mode **Grid**, **Fokus** (satu kamera utama + lima pendamping), dan **Video wall** dalam satu workspace. Pemilihan kamera, kepadatan grid dan overlay dipakai bersama saat berpindah mode; fullscreen tersedia di ketiganya. Daftar/pencarian kamera dan preview RTSP tetap tersedia. Pengaturan webcam dibuka dari ikon pengaturan pada tile. Aktifkan **Deteksi** untuk menampilkan bounding box. Tambahan kamera RTSP berlabel **Preview saja**; koneksinya tersedia selama proses aplikasi berjalan. Lihat [panduan camera wall](docs/runtime/CAMERA-WALL.md).
 
 Panduan runtime Python dan demo yang sudah diuji: [Runtime pilot](docs/runtime/README.md). Demo memakai input sintetis berlabel jelas; setiap invocation menghasilkan database baru. Mode Vite menyediakan prototipe mock terpisah; mode dashboard Python memakai data engine dan mendukung preview webcam lokal.
 

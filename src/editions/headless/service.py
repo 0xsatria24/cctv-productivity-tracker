@@ -24,7 +24,7 @@ class EngineService:
             if len(self.cameras) >= self.license.max_cameras:
                 raise ValueError('Licensed camera limit reached')
             url = validate_rtsp_url(url)
-            settings = replace(self.settings, database=self.settings.database.parent / (sha256(camera_id.encode()).hexdigest() + '.sqlite3'))
+            settings = replace(self.settings, camera_id=camera_id, database=self.settings.database.parent / (sha256(camera_id.encode()).hexdigest() + '.sqlite3'))
             engine = create_live_engine(settings, create_detector(*self.detector_options))
             self.cameras[camera_id] = (url, engine)
             return self.status(camera_id)

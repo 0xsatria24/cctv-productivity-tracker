@@ -72,6 +72,12 @@ def test_dashboard_replay_reports_timeline_and_csv_match_sqlite(integrated):
     assert first['occupied_us'] == 4_000_000
     assert first['empty_us'] == 1_800_000
     assert first['unknown_us'] == 11_200_000
+    daily = result['daily'][0]
+    assert daily['workspace_id'] == first['workspace_id']
+    assert daily['occupied_us'] == first['occupied_us']
+    assert daily['unknown_us'] == first['unknown_us']
+    assert daily['timezone'] == 'Asia/Jakarta'
+    assert daily['identity_source'] == 'anonymous'
     assert sum((r['end']-r['start'])*1000 for r in result['intervals'] if r['workspaceId']==first['workspace_id']) == 17_000_000
     filtered = client.get('/pilot/v1/reports', params={'run_id': completed['run_id'],'workspace_id':first['workspace_id']}).json()
     assert len(filtered['workstations']) == 1
@@ -79,6 +85,11 @@ def test_dashboard_replay_reports_timeline_and_csv_match_sqlite(integrated):
     csv = client.get('/pilot/v1/export.csv', params={'run_id': completed['run_id'],'workspace_id':first['workspace_id']})
     assert 'SYNTHETIC_REPLAY' in csv.text and '4000000,1800000,11200000' in csv.text
     assert 'Meja A02' not in csv.text
+    daily_csv = client.get('/pilot/v1/export.csv', params={'run_id': completed['run_id'], 'workspace_id': first['workspace_id'], 'daily': True})
+    assert 'cctv-daily-report.csv' in daily_csv.headers['content-disposition']
+    assert 'timezone=Asia/Jakarta' in daily_csv.text
+    assert '4000000,1800000,11200000' in daily_csv.text
+    assert 'Meja A02' not in daily_csv.text
     assert client.get('/pilot/v1/reports', params={'run_id':'missing'}).status_code == 404
     assert client.get('/pilot/v1/reports', params={'start_utc_us':2,'end_utc_us':1}).status_code == 422
     with closing(Database(config.database)) as db:
@@ -106,6 +117,29 @@ def test_cancel_then_restart_preserves_history_and_inserts_unknown_gap(integrate
         assert db.conn.execute('SELECT COUNT(*) FROM event_log').fetchone()[0]==first_events+86
     all_runs=client.get('/pilot/v1/reports').json()
     assert any(r['reason']=='ENGINE_INTERRUPTED' for r in all_runs['intervals'])
+    for workspace in all_runs['workstations']:
+        days = [row for row in all_runs['daily'] if row['workspace_id'] == workspace['workspace_id']]
+        for key in ('occupied_us', 'empty_us', 'unknown_us', 'eligible_us'):
+            assert sum(row[key] for row in days) == workspace[key]
+
+
+def test_daily_report_respects_end_of_workspace_monitoring(integrated):
+    client, controller, config = integrated
+    client.get('/')
+    controller.delay = 0
+    client.post('/pilot/v1/replay', headers=ORIGIN)
+    completed = wait(controller)
+    original = client.get('/pilot/v1/reports', params={'run_id': completed['run_id']}).json()
+    workspace_id = original['workstations'][0]['workspace_id']
+    start = original['start_utc_us']
+    stop = start + 8_000_000
+    with closing(Database(config.database)) as db, db.transaction() as conn:
+        conn.execute('UPDATE workspaces SET monitoring_to_utc_us=? WHERE id=?', (stop, workspace_id))
+    result = client.get('/pilot/v1/reports', params={'run_id': completed['run_id'], 'workspace_id': workspace_id}).json()
+    row, = result['daily']
+    assert row['end_utc_us'] == stop
+    assert row['eligible_us'] == 8_000_000
+    assert sum((interval['end'] - interval['start']) * 1000 for interval in result['intervals']) == row['eligible_us']
 
 
 def test_employee_assignment_is_persisted_and_cannot_spoof_identity(integrated):

@@ -142,6 +142,13 @@ class CameraWall:
             camera = self._cameras.get(camera_id)
         return camera.frame() if camera else None
 
+    def source_url(self, camera_id):
+        with self._lock:
+            camera = self._cameras.get(camera_id)
+            if not camera:
+                raise LookupError('Kamera tidak ditemukan. Tambahkan kembali sumber kamera.')
+            return camera._url
+
     def remove(self, camera_id):
         with self._lock:
             camera = self._cameras.pop(camera_id, None)

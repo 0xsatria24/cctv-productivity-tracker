@@ -10,6 +10,7 @@ from .config import timestamp
 from .persistence import Database
 from .pipeline import Pipeline
 from .vision import Detection
+from .daily_analytics import daily_summary
 
 
 class ReplayController:
@@ -118,7 +119,7 @@ def snapshot(db, controller=None, timezone="Asia/Jakarta"):
             "assignments": [dict(r) for r in conn.execute("SELECT a.*,e.display_name,w.name AS workspace_name FROM workstation_assignments a JOIN employees e ON e.id=a.employee_id JOIN workspaces w ON w.id=a.workspace_id ORDER BY a.effective_from_utc_us DESC LIMIT 100")]}
 
 
-def report(db, start=None, end=None, run_id=None, workspace_id=None):
+def report(db, start=None, end=None, run_id=None, workspace_id=None, timezone="Asia/Jakarta"):
     params = () if not run_id else (run_id,)
     where = "" if not run_id else "WHERE id=?"
     bounds = db.conn.execute(f"SELECT MIN(started_utc_us),MAX(COALESCE(ended_utc_us,(SELECT MAX(observed_utc_us) FROM event_log e WHERE e.engine_run_id=engine_runs.id))) FROM engine_runs {where}", params).fetchone()
@@ -134,7 +135,7 @@ def report(db, start=None, end=None, run_id=None, workspace_id=None):
             raise ValueError("Invalid report range")
     if start is None or end is None:
         return {"basis": "monitoring_window", "schedule_applied": False, "start_utc_us": start, "end_utc_us": end,
-                "workstations": [], "intervals": [], "data_sources": [], "committed_event_seq": 0}
+                "workstations": [], "intervals": [], "daily": [], "timezone": timezone, "data_sources": [], "committed_event_seq": 0}
     if start < 0:
         raise ValueError("Invalid report range")
     result = db.report(start, end, run_id=run_id)
@@ -142,19 +143,23 @@ def report(db, start=None, end=None, run_id=None, workspace_id=None):
         result["workstations"] = [r for r in result["workstations"] if r["workspace_id"] == workspace_id]
     intervals = []
     for workspace in result["workstations"]:
-        cursor = max(start, db.conn.execute("SELECT monitoring_from_utc_us FROM workspaces WHERE id=?", (workspace["workspace_id"],)).fetchone()[0])
+        monitoring = db.conn.execute("SELECT monitoring_from_utc_us,monitoring_to_utc_us FROM workspaces WHERE id=?", (workspace["workspace_id"],)).fetchone()
+        cursor = max(start, monitoring[0])
+        workspace_end = min(end, monitoring[1] or end)
         raw = db.conn.execute("SELECT z.*,c.revision FROM zone_intervals z JOIN workspace_configurations c ON c.id=z.configuration_id WHERE z.workspace_id=? AND z.start_utc_us<? AND z.evidence_until_utc_us>? "
                               + ("AND z.engine_run_id=? " if run_id else "") + "ORDER BY z.start_utc_us", (workspace["workspace_id"], end, start, *([run_id] if run_id else [])))
         for row in raw:
-            left, right = max(cursor, row["start_utc_us"]), min(end, row["evidence_until_utc_us"])
+            left, right = max(cursor, row["start_utc_us"]), min(workspace_end, row["evidence_until_utc_us"])
             if right <= left:
                 continue
             if left > cursor:
                 intervals.append({"id": f"gap:{workspace['workspace_id']}:{cursor}", "workspaceId": workspace["workspace_id"], "start": cursor / 1000, "end": left / 1000, "state": "UNKNOWN", "count": None, "reason": "ENGINE_INTERRUPTED", "revision": None})
             intervals.append({"id": row["id"], "workspaceId": workspace["workspace_id"], "start": left / 1000, "end": right / 1000, "state": row["state"], "count": row["observed_count"], "reason": row["reason"], "revision": row["revision"]})
             cursor = right
-        if cursor < end:
-            intervals.append({"id": f"tail:{workspace['workspace_id']}:{cursor}", "workspaceId": workspace["workspace_id"], "start": cursor / 1000, "end": end / 1000, "state": "UNKNOWN", "count": None, "reason": "FRAME_STALE", "revision": None})
+        if cursor < workspace_end:
+            intervals.append({"id": f"tail:{workspace['workspace_id']}:{cursor}", "workspaceId": workspace["workspace_id"], "start": cursor / 1000, "end": workspace_end / 1000, "state": "UNKNOWN", "count": None, "reason": "FRAME_STALE", "revision": None})
     result["intervals"] = intervals
+    result["timezone"] = timezone
+    result["daily"] = daily_summary(intervals, result["workstations"], timezone)
     result["committed_event_seq"] = db.conn.execute("SELECT COALESCE(MAX(seq),0) FROM event_log").fetchone()[0]
     return result

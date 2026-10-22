@@ -112,6 +112,8 @@ def test_multi_camera_uses_real_shared_accounting_with_synthetic_capture(tmp_pat
             assert client.post(f'/api/v1/cameras/{camera}/start', headers=AUTH).status_code == 202
         wait_for(lambda: all(s['processed'] >= 6 for s in service.all_status()))
         for camera in ('one', 'two'):
+            snapshot = service.status(camera)['latest']
+            assert snapshot['sessions'][0]['camera_id'] == camera
             events = client.get(f'/api/v1/cameras/{camera}/events', headers=AUTH).json()
             assert any(e['event_type'] == 'ENTER' for e in events['items'])
             assert all(e['camera_id'] == camera for e in events['items'])

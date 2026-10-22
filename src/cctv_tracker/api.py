@@ -7,7 +7,7 @@ import secrets
 import sqlite3
 from typing import Literal
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, Query
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -64,6 +64,7 @@ class LiveStartInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     source: Literal['WEBCAM_LIVE', 'RTSP_LIVE']
     url: str | None = Field(default=None, max_length=2048)
+    camera_id: str | None = Field(default=None, min_length=1, max_length=80)
     preview_only: bool = False
     camera_key: str | None = Field(default=None, min_length=64, max_length=64)
 
@@ -205,7 +206,14 @@ def create_app(database: Path, token: str, *, controller=None, ui_dir: Path | No
         if not live:
             raise HTTPException(status_code=409, detail='Engine live tidak tersedia')
         try:
-            return live.start(values.source, values.url, preview_only=values.preview_only, camera_key=values.camera_key)
+            url = values.url
+            if values.camera_id:
+                if values.source != 'RTSP_LIVE' or values.url:
+                    raise HTTPException(status_code=422, detail='Pilih satu sumber RTSP dari daftar kamera.')
+                url = require_wall().source_url(values.camera_id)
+            return live.start(values.source, url, preview_only=values.preview_only, camera_key=values.camera_key)
+        except LookupError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from None
         except ValueError as error:
             raise HTTPException(status_code=409, detail=str(error)) from None
 
@@ -219,11 +227,11 @@ def create_app(database: Path, token: str, *, controller=None, ui_dir: Path | No
             raise HTTPException(status_code=409, detail=str(error)) from None
 
     @app.get('/pilot/v1/live/preview.jpg', dependencies=[Depends(authenticate)])
-    def live_preview():
-        frame = live.preview_jpeg() if live else None
+    def live_preview(frame_seq: int | None = Query(None, ge=1), run_id: str | None = Query(None, max_length=64)):
+        frame = live.preview_frame(frame_seq, run_id) if live else None
         if not frame:
             raise HTTPException(status_code=404, detail='Frame live belum tersedia atau stale')
-        return Response(frame, media_type='image/jpeg')
+        return Response(frame[0], media_type='image/jpeg', headers=frame[1])
 
     def require_wall():
         if not camera_wall:
@@ -271,7 +279,7 @@ def create_app(database: Path, token: str, *, controller=None, ui_dir: Path | No
         try:
             with closing(Database(database_for(dataset), migrate=False)) as db, db.conn:
                 db.conn.execute("BEGIN")
-                return dashboard_report(db, start_utc_us, end_utc_us, run_id, workspace_id)
+                return dashboard_report(db, start_utc_us, end_utc_us, run_id, workspace_id, timezone=timezone)
         except ValueError:
             raise HTTPException(status_code=422, detail="Invalid report range") from None
         except LookupError:
@@ -282,10 +290,17 @@ def create_app(database: Path, token: str, *, controller=None, ui_dir: Path | No
         return query(start_utc_us, end_utc_us, run_id, workspace_id, dataset)
 
     @app.get("/pilot/v1/export.csv", dependencies=[Depends(authenticate)])
-    def export(start_utc_us: int | None = None, end_utc_us: int | None = None, run_id: str | None = None, workspace_id: str | None = None, dataset: Literal['replay', 'live'] = 'replay'):
+    def export(start_utc_us: int | None = None, end_utc_us: int | None = None, run_id: str | None = None, workspace_id: str | None = None, dataset: Literal['replay', 'live'] = 'replay', daily: bool = False):
         result = query(start_utc_us, end_utc_us, run_id, workspace_id, dataset)
         buffer = io.StringIO(newline="")
         writer = csv.writer(buffer)
+        if daily:
+            writer.writerow(["CCTV DAILY", "timezone=" + timezone, "identity_source=anonymous", "basis=monitoring_window", "schedule_applied=false", "sources=" + ",".join(result["data_sources"])])
+            fields = ["date", "workspace_id", "workspace", "occupied_us", "empty_us", "unknown_us", "eligible_us", "coverage", "utilization", "first_seen_utc_us", "last_seen_utc_us", "start_utc_us", "end_utc_us", "provisional", "partial_day"]
+            writer.writerow(fields)
+            for row in result["daily"]:
+                writer.writerow([("'" + value if isinstance(value, str) and value.lstrip().startswith(("=", "+", "-", "@")) else value) for value in (row[key] for key in fields)])
+            return Response(buffer.getvalue(), media_type="text/csv; charset=utf-8", headers={"Content-Disposition": 'attachment; filename="cctv-daily-report.csv"'})
         writer.writerow(["CCTV ENGINE", "identity_source=anonymous", "sources=" + ",".join(result["data_sources"]), "basis=monitoring_window", "schedule_applied=false"])
         writer.writerow(["workspace_id", "workspace", "occupied_us", "empty_us", "unknown_us", "eligible_us", "utilization", "coverage"])
         for row in result["workstations"]:

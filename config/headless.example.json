@@ -3,5 +3,11 @@
   "device": "CPU",
   "model_path": "models/webcam-yolox.onnx",
   "port": 8766,
+  "sessions": {
+    "grace_period_seconds": 10,
+    "motion_recovery_seconds": 3.5,
+    "count_lost_gap": false,
+    "diagnostics": false
+  },
   "cameras": []
 }

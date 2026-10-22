@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from collections import deque
 from pathlib import Path
 import hashlib
 import json
@@ -8,6 +9,7 @@ from .domain.occupancy import Observation, State, ZoneAccumulator
 from .vision import Detection, Tracker, associate
 from .lease import EngineLease
 from .persistence import stable_id
+from .sessions import SessionManager
 
 
 class Pipeline:
@@ -26,8 +28,29 @@ class Pipeline:
         self.last_sequence = None
         self.live_events = live_events
         self.confirmed = {}
+        self.sessions = SessionManager(settings)
+        self.last_monotonic_ns = None
+        self.last_generation = None
+        self.clock_anchor = None
+        self.latest = None
+        self.retired_generations = deque(maxlen=16)
 
-    def feed(self, detections, utc_us, monotonic_ns, seq, generation, unavailable=None):
+    def feed(self, detections, utc_us, monotonic_ns, seq, generation, unavailable=None, *, mapping_version=None):
+        # Reject before ANY tracker/session/zone mutation. A result from a retired
+        # frame cannot rebind a session or advance the durable checkpoint.
+        if (generation in self.retired_generations or
+                (mapping_version is not None and mapping_version != self.sessions.mapping_version) or
+                (self.last_monotonic_ns is not None and (monotonic_ns <= self.last_monotonic_ns
+                or (generation == self.last_generation and seq <= self.last_sequence)))):
+            self.sessions._diagnose('stale_result')
+            return {**(self.latest or {}), 'ignored': True, 'ignore_reason': 'STALE_FRAME', 'detections': []}
+        if seq < 1 or monotonic_ns < 0 or utc_us < 0 or not generation or (self.clock_anchor is None and utc_us < self.start):
+            raise ValueError('Invalid pipeline observation envelope')
+        captured_utc_us = utc_us
+        if self.clock_anchor is None:
+            self.clock_anchor = (utc_us, monotonic_ns)
+        # UTC is a calendar anchor; elapsed time follows monotonic/media time.
+        utc_us = self.clock_anchor[0] + (monotonic_ns - self.clock_anchor[1]) // 1000
         scoped_generation = stable_id(self.writer.run_id + ":" + generation)
         visits = []
         tracked = []
@@ -36,11 +59,10 @@ class Pipeline:
         else:
             tracked = self.tracker.update(detections, monotonic_ns / 1e9, scoped_generation)
             mapped = associate(tracked, self.settings.zones, self.settings.rules)
-            for detection in tracked:
-                if detection.track_id is None:
-                    continue
-                targets = associate([detection], self.settings.zones, self.settings.rules)
-                visits.extend((detection.track_id, alias) for alias, row in targets.items() if row[0] == State.OCCUPIED)
+        bindings = self.sessions.update(tracked, utc_us, monotonic_ns, scoped_generation, unavailable)
+        for detection, session in bindings:
+            if session is not None:
+                visits.extend((session.track_lifecycle, alias) for alias, zone in session.zones.items() if zone.observed_inside)
         previous_states = {alias: a.current.state for alias, a in self.accumulators.items()}
         previous_candidates = {alias: a.candidate for alias, a in self.accumulators.items()}
         for alias, accumulator in self.accumulators.items():
@@ -57,37 +79,56 @@ class Pipeline:
                                         "evidence_first_utc_us": utc_us - (monotonic_ns - candidate[1]) // 1000 if candidate else utc_us,
                                         "confirmation_utc_us": utc_us})
                     self.confirmed[alias] = current.state
+        session_rows = self.sessions.rows()
+        session_snapshots = {row['session_id']: row for row in session_rows}
         try:
-            self.writer.commit(self.accumulators, utc_us, generation=scoped_generation, frame_seq=seq, monotonic_ns=monotonic_ns, visits=visits, transitions=transitions)
+            self.writer.commit(self.accumulators, utc_us, generation=scoped_generation, frame_seq=seq, monotonic_ns=monotonic_ns,
+                               visits=visits, transitions=transitions, sessions=session_rows,
+                               session_events=self.sessions.events, mapping_version=self.sessions.mapping_version,
+                               emit_session_events=self.live_events)
         except Exception:
             # The owning command aborts; uncommitted memory is never retried as evidence.
             logging.getLogger("cctv_tracker").error("PERSISTENCE_GAP: accounting stopped")
             raise
         self.last_utc = utc_us
-        # Use the committed visit timestamps for each person's current workstation
-        # timer. A new track/visit gets its own clock, never another occupant's time.
-        active_visits = self.database.conn.execute(
-            'SELECT track_id, workspace_id, start_utc_us, last_observed_utc_us FROM track_visits '
-            'WHERE generation_id=? AND end_utc_us IS NULL', (scoped_generation,)).fetchall()
-        workstation_times = {}
-        for visit in active_visits:
-            alias = next(alias for alias, config in self.writer.configs.items() if config[0] == visit['workspace_id'])
-            workstation_times.setdefault(visit['track_id'], []).append({
-                'zone_id': alias, 'name': next(z.name for z in self.settings.zones if z.id == alias),
-                'presence_us': max(0, visit['last_observed_utc_us'] - visit['start_utc_us']),
-            })
-        return {"run_id": self.writer.run_id, "committed_sequence": self.writer.seq,
-                "detections": [{**dataclass_detection(d), 'workstation_times': workstation_times.get(d.track_id, [])} for d in tracked],
+        if self.last_generation is not None and self.last_generation != generation:
+            self.retired_generations.append(self.last_generation)
+        self.last_monotonic_ns, self.last_sequence, self.last_generation = monotonic_ns, seq, generation
+        # These exact session snapshots have committed in the same transaction.
+        # Each overlay pairs a CURRENT measured box with that binding's timer.
+        rows = []
+        for detection, session in bindings:
+            snapshot = session_snapshots[session.session_id] if session else None
+            rows.append({**dataclass_detection(detection), 'track_id': session.track_id if session else None,
+                         'session_id': session.session_id if session else None,
+                         'track_lifecycle': session.track_lifecycle if session else None,
+                         'mapping_version': self.sessions.mapping_version,
+                         'first_seen_utc_us': session.first_seen if session else None,
+                         'last_seen_utc_us': session.last_seen if session else None,
+                         'accumulated_duration_us': session.accumulated_ns // 1000 if session else 0,
+                         'session_status': session.status if session else 'UNASSIGNED',
+                         'workstation_times': [{'zone_id': alias, 'name': next(z.name for z in self.settings.zones if z.id == alias),
+                                                'presence_us': zone['presence_us']}
+                                               for alias, zone in (snapshot['zone_times'].items() if snapshot else ()) if zone['inside']]})
+        self.latest = {"run_id": self.writer.run_id, "committed_sequence": self.writer.seq,
+                'frame_seq': seq, 'generation_id': scoped_generation, 'mapping_version': self.sessions.mapping_version,
+                'frame_monotonic_ns': str(monotonic_ns), 'captured_utc_us': captured_utc_us,
+                'sessions': [session_snapshots.get(s.session_id) or self.sessions.snapshot(s) for s in self.sessions.sessions.values()],
+                'session_metrics': dict(self.sessions.metrics),
+                "detections": rows,
                 "zones": [{"id": alias, "name": next(z.name for z in self.settings.zones if z.id == alias),
                            "state": a.current.state, "count": a.current.count, "reason": a.current.reason,
                            "state_since_utc_us": a.current.start, "evidence_until_utc_us": a.current.until}
                           for alias, a in self.accumulators.items()]}
+        self.sessions.checkpoint()
+        return self.latest
 
     def finish(self, reason="COMPLETED"):
         try:
             self.writer.finish(self.last_utc, reason)
             return self.database.report(self.start, max(self.last_utc, self.start + 1), run_id=self.writer.run_id)
         finally:
+            self.sessions.finish()
             self.lease.close()
 
 

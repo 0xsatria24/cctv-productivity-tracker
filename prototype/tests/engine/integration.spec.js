@@ -17,12 +17,13 @@ test('dashboard calls Python, shows committed golden metrics, filters, timeline 
   test.setTimeout(150000);
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.goto('/');
+  await page.getByLabel('Sumber data laporan', {exact:true}).selectOption('replay');
   await expect(page.getByText('REPLAY SIMULASI',{exact:true})).toBeVisible();
   await expect(page.getByTestId('engine-connection')).toContainText('terhubung');
   const start=page.waitForResponse(r=>r.url().endsWith('/pilot/v1/replay')&&r.request().method()==='POST');
   await page.getByRole('button',{name:'Jalankan replay',exact:true}).click();
   expect((await start).status()).toBe(202);
-  await expect(page.getByText('Status:',{exact:false}).filter({hasText:'COMPLETED'})).toBeVisible({timeout:120000});
+  await expect(page.getByText('Status simulasi:',{exact:false}).filter({hasText:'COMPLETED'})).toBeVisible({timeout:120000});
   await page.getByRole('button',{name:'Ringkasan',exact:true}).click();
   await expect(page.getByTestId('engine-metrics')).toContainText('4 dtk');
   await page.getByRole('button',{name:'Laporan',exact:true}).click();
@@ -31,13 +32,13 @@ test('dashboard calls Python, shows committed golden metrics, filters, timeline 
   await page.getByRole('button',{name:'Terapkan filter',exact:true}).click();
   await expect(page.getByTestId('engine-report').locator('tbody tr')).toHaveCount(1);
   const downloadPromise=page.waitForEvent('download');
-  await page.getByRole('button',{name:'Ekspor CSV engine',exact:true}).click();
+  await page.getByRole('button',{name:'Ekspor CSV',exact:true}).click();
   const download=await downloadPromise;expect(download.suggestedFilename()).toBe('cctv-engine-report.csv');
-  const csv=await page.request.get('/pilot/v1/export.csv?run_id='+await page.getByLabel('Run',{exact:true}).evaluate(el=>el.value==='LATEST'?'':el.value));
+  const csv=await page.request.get('/pilot/v1/export.csv?run_id='+await page.getByLabel('Sesi monitoring',{exact:true}).evaluate(el=>el.value==='LATEST'?'':el.value));
   expect(csv.status()).toBe(200);expect(await csv.text()).toContain('SYNTHETIC_REPLAY');
   await page.getByRole('button',{name:'Analitik',exact:true}).click();
   await page.getByRole('button',{name:'Timeline',exact:true}).click();
-  await expect(page.getByTestId('engine-intervals')).toContainText('CAMERA_OFFLINE');
+  await expect(page.getByTestId('engine-intervals')).toContainText('Koneksi kamera terputus');
   await expect(page.locator('.timeline-segment')).not.toHaveCount(0);
   await page.locator('.timeline-segment').first().click();
   await expect(page.getByRole('dialog')).toContainText('Detail interval');
@@ -48,6 +49,7 @@ test('dashboard calls Python, shows committed golden metrics, filters, timeline 
 
 test('employee and assignment forms persist through API and reload without claiming observed identity',async({page})=>{
   await page.goto('/#/workspaces');
+  await page.getByLabel('Sumber data laporan', {exact:true}).selectOption('replay');
   const employeeName='Karyawan UI '+Date.now();
   await page.getByRole('button',{name:'Tambah karyawan',exact:true}).click();
   await page.getByLabel('Nama karyawan',{exact:true}).fill(employeeName);
@@ -73,24 +75,25 @@ test('employee and assignment forms persist through API and reload without claim
   await page.screenshot({path:'verification/screenshots/engine-workstations-1440.png',fullPage:true});
 });
 
-test('all seven pages navigate; engine outage is explicit and never falls back to mock metrics',async({page})=>{
+test('all six pages navigate; engine outage is explicit and never falls back to mock metrics',async({page})=>{
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.goto('/');
-  for(const name of ['Ringkasan','Pemantauan Live','Workstation','Analitik','Laporan','Kamera','Pengaturan']){
+  for(const name of ['Ringkasan','Pemantauan Live','Workstation','Analitik','Laporan','Pengaturan']){
     await page.getByRole('button',{name,exact:true}).click();await expect(page.getByRole('heading',{name,exact:true,level:1})).toBeVisible();
   }
   await page.getByRole('button',{name:'Ringkasan',exact:true}).click();
   await page.screenshot({path:'verification/screenshots/engine-overview-1440.png',fullPage:true});
   await page.setViewportSize({width:1100,height:720});
   await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
-  await page.route('**/pilot/v1/status',route=>route.abort());
-  await page.getByRole('button',{name:'Refresh engine',exact:true}).click();
-  await expect(page.getByRole('alert')).toContainText('Engine tidak terhubung');
+  await page.getByLabel('Sumber data laporan', {exact:true}).selectOption('replay');
+  await page.route('**/pilot/v1/status*',route=>route.abort());
+  await page.getByRole('button',{name:'Perbarui status',exact:true}).click();
+  await expect(page.getByRole('alert')).toContainText('Layanan monitoring tidak terhubung');
   await expect(page.getByTestId('engine-connection')).toContainText('terputus');
   await expect(page.getByRole('button',{name:'Jalankan replay',exact:true})).toBeDisabled();
   await expect(page.getByText('DATA SIMULASI',{exact:true})).toHaveCount(0);
-  await page.unroute('**/pilot/v1/status');
-  await page.getByRole('button',{name:'Refresh engine',exact:true}).click();
+  await page.unroute('**/pilot/v1/status*');
+  await page.getByRole('button',{name:'Perbarui status',exact:true}).click();
   await expect(page.getByTestId('engine-connection')).toContainText('terhubung');
   expect(errors).toEqual([]);
 });

@@ -22,14 +22,14 @@ test('detection overlay mirrors and stale or failed inference never shows an old
   await page.getByRole('button', { name: 'Selesai', exact: true }).click();
   await expect(page.locator('.person-box')).toHaveAttribute('x', '64');
   failing = true;
-  await expect(engine).toContainText('Engine tidak terhubung');
+  await expect(engine).toContainText('Analisis belum terhubung');
   await expect(page.locator('.person-box')).toHaveCount(0);
   await expect(engine).not.toContainText('1 orang');
   await expect(status(page)).toContainText('Live');
   failing = false;
   await expect(engine).toContainText('1 orang terdeteksi');
   await stop(page).click();
-  await expect(engine).toContainText('Engine menunggu webcam');
+  await expect(engine).toContainText('Analisis menunggu kamera');
   await expect(page.locator('.person-box')).toHaveCount(0);
 });
 
@@ -68,7 +68,7 @@ test('browser camera renders moving video, controls work, and no webcam observat
   expect(after.runs.length).toBe(before.runs.length);
   expect(mutations.length).toBeGreaterThan(0);
   expect(mutations.every(url => url.endsWith('/pilot/v1/webcam/frame') || url.endsWith('/pilot/v1/camera-wall/view'))).toBe(true);
-  await expect(page.getByTestId('webcam-engine-status')).toContainText('Engine deteksi aktif');
+  await expect(page.getByTestId('webcam-engine-status')).toContainText('Analisis orang aktif');
   await page.screenshot({ path: 'verification/screenshots/webcam-test-source-1440.png', fullPage: true });
   await page.setViewportSize({ width: 1100, height: 720 });
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
@@ -99,8 +99,8 @@ test('camera and inference survive navigation; explicit stop releases the track'
   expect(await page.locator('video').evaluate(element => element.srcObject.getVideoTracks()[0] === window.testTrack)).toBe(true);
   await page.getByRole('button', { name: 'Ringkasan', exact: true }).click();
   expect(await page.evaluate(() => window.testTrack.readyState)).toBe('live');
-  await expect(page.getByTestId('webcam-engine-status')).toContainText('Engine deteksi aktif');
-  for (const name of ['Laporan', 'Kamera']) {
+  await expect(page.getByTestId('webcam-engine-status')).toContainText('Analisis orang aktif');
+  for (const name of ['Laporan', 'Pemantauan Live']) {
     await page.getByRole('button', { name, exact: true }).click();
     expect(await page.locator('video').evaluate(element => element.srcObject.getVideoTracks()[0] === window.testTrack)).toBe(true);
   }
@@ -158,14 +158,14 @@ for (const [name, message] of [['NotFoundError', 'Webcam tidak ditemukan'], ['No
 }
 
 test('webcam preview remains available when engine status API is offline from initial load', async ({ page }) => {
-  await page.route('**/pilot/v1/status', route => route.abort());
+  await page.route('**/pilot/v1/status*', route => route.abort());
   await page.goto('/#/cameras');
-  await expect(page.getByRole('alert')).toContainText('Engine tidak terhubung');
+  await expect(page.getByRole('alert')).toContainText('Layanan monitoring tidak terhubung');
   await start(page).click();
   await expect(status(page)).toContainText('Live');
   await page.getByRole('button', { name: 'Ringkasan', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Jalankan replay', exact: true })).toBeDisabled();
-  await page.getByRole('button', { name: 'Kamera', exact: true }).click();
+  await expect(page.getByTestId('engine-connection')).toContainText('terputus');
+  await page.getByRole('button', { name: 'Pemantauan Live', exact: true }).click();
   await stop(page).click();
 });
 

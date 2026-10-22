@@ -233,9 +233,9 @@ function WebcamVideo({ webcam }) {
     {notice && <p className="webcam-fullscreen-notice" role="status">{notice}</p>}
   </div>
     <div className="webcam-engine-status" data-testid="webcam-engine-status" role="status">
-      <Status value={showDetections ? 'ONLINE' : engineError ? 'OFFLINE' : 'DISABLED'} label={!webcam.stream ? 'Engine menunggu webcam' : webcam.inferencePaused ? 'Preview saja; engine memproses RTSP' : engineError ? 'Engine tidak terhubung' : showDetections ? 'Engine deteksi aktif' : 'Menunggu hasil frame baru'}/>
+      <Status value={showDetections ? 'ONLINE' : engineError ? 'OFFLINE' : 'DISABLED'} label={!webcam.stream ? 'Analisis menunggu kamera' : webcam.inferencePaused ? 'Preview saja; analisis memakai kamera RTSP' : engineError ? 'Analisis belum terhubung' : showDetections ? 'Analisis orang aktif' : 'Menunggu hasil frame baru'}/>
       {showDetections && <><strong>{analysis.count} orang terdeteksi</strong><span>{analysis.model} · {analysis.inference_ms} ms inferensi · {analysis.roundtrip_ms} ms respons</span></>}
-      {showDetections && <span>{analysis.recorded ? 'Tracking dan checkpoint SQLite aktif' : 'Preview deteksi; pencatatan belum dimulai'}</span>}
+      {showDetections && <span>{analysis.recorded ? 'Durasi zona tersimpan' : 'Preview deteksi; monitoring belum dimulai'}</span>}
       {engineError && <span className="error-text">{engineError}</span>}
     </div>
   </>;

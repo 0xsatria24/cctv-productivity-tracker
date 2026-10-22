@@ -95,3 +95,34 @@ def test_authenticated_preview_api_never_writes_observations(tmp_path, monkeypat
         assert client.get('/pilot/v1/status?dataset=live', headers=headers).json()['runs'] == []
         assert client.delete(f'/pilot/v1/camera-wall/cameras/{camera}', headers=headers).status_code == 200
         assert client.get(f'/pilot/v1/camera-wall/cameras/{camera}/frame.jpg', headers=headers).status_code == 404
+
+
+def test_live_start_resolves_registered_source_without_exposing_credentials(tmp_path, monkeypatch):
+    from cctv_tracker.live import LiveController
+    calls = []
+
+    def start(self, source, url=None, *, preview_only=False, camera_key=None):
+        calls.append((source, url, preview_only))
+        return {'status': 'STARTING', 'source': source, 'preview_only': preview_only}
+
+    monkeypatch.setattr(LiveController, 'start', start)
+    path = tmp_path / 'source-bridge.sqlite3'
+    with closing(Database(path)):
+        pass
+    controller = ReplayController(Settings(database=path))
+    headers = {'Authorization': 'Bearer ' + 't' * 32}
+    with TestClient(create_app(path, 't' * 32, controller=controller)) as client:
+        url = 'rtsp://operator:private-password@localhost/source'
+        camera = client.post('/pilot/v1/camera-wall/cameras', json={'name': 'Source bridge', 'url': url}, headers=headers).json()
+        request = {'source': 'RTSP_LIVE', 'camera_id': camera['id'], 'preview_only': True}
+        assert client.post('/pilot/v1/live/start', json=request).status_code == 401
+        response = client.post('/pilot/v1/live/start', json=request, headers=headers)
+        assert response.status_code == 202
+        assert calls == [('RTSP_LIVE', url, True)]
+        assert 'private-password' not in response.text
+        assert 'rtsp://' not in client.get('/pilot/v1/camera-wall', headers=headers).text
+        assert client.post('/pilot/v1/live/start', json={**request, 'url': url}, headers=headers).status_code == 422
+        assert client.post('/pilot/v1/live/start', json={**request, 'source': 'WEBCAM_LIVE'}, headers=headers).status_code == 422
+        client.delete(f"/pilot/v1/camera-wall/cameras/{camera['id']}", headers=headers)
+        assert client.post('/pilot/v1/live/start', json=request, headers=headers).status_code == 404
+        assert len(calls) == 1
