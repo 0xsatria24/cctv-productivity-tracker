@@ -52,10 +52,10 @@ export function useEngine() {
     finally{if(mounted.current)setMutating(false);}
   }
   function toast(message){setNotice(message);clearTimeout(noticeTimer.current);noticeTimer.current=setTimeout(()=>setNotice(''),5500);}
-  async function exportCsv(){
+  async function exportCsv(kind){
     if(exporting||reportLoading)return;
     setExporting(true);
-    try{const response=await fetch(`/pilot/v1/export.csv?${query}`,{credentials:'same-origin',cache:'no-store',signal:AbortSignal.timeout(15000)});if(!response.ok)throw new Error('Ekspor gagal. Periksa koneksi dan rentang laporan.');const url=URL.createObjectURL(await response.blob());const anchor=document.createElement('a');anchor.href=url;anchor.download='cctv-engine-report.csv';anchor.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('Laporan CSV berhasil diunduh.');}catch(error){toast(error.name==='TimeoutError'?'Ekspor melewati batas waktu. Periksa koneksi lalu coba lagi.':error.message);}finally{if(mounted.current)setExporting(false);}
+    try{const response=await fetch(`/pilot/v1/export.csv?${query}${kind==='daily'?'&daily=true':''}`,{credentials:'same-origin',cache:'no-store',signal:AbortSignal.timeout(15000)});if(!response.ok)throw new Error('Ekspor gagal. Periksa koneksi dan rentang laporan.');const url=URL.createObjectURL(await response.blob());const anchor=document.createElement('a');anchor.href=url;anchor.download=kind==='daily'?'cctv-daily-report.csv':'cctv-engine-report.csv';anchor.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('Laporan CSV berhasil diunduh.');}catch(error){toast(error.name==='TimeoutError'?'Ekspor melewati batas waktu. Periksa koneksi lalu coba lagi.':error.message);}finally{if(mounted.current)setExporting(false);}
   }
   return {cameraId,setCameraId,dataset,setDataset,snapshot,connectionError,report,reportError,reportLoading,selection,setSelection,runId,filters,setFilters,loading,reload,action,exportCsv,exporting,mutating,notice,toast,receivedAt};
 }

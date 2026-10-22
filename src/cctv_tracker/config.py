@@ -50,6 +50,47 @@ class Rules:
 
 
 @dataclass(frozen=True)
+class SessionRules:
+    grace_period_seconds: float = 10
+    motion_recovery_seconds: float = 3.5
+    recovery_confirm_observations: int = 3
+    recovery_confirm_seconds: float = 0.2
+    recovery_confirmation_window_seconds: float = 1
+    active_position_tolerance: float = 0.12
+    recovery_position_tolerance: float = 0.035
+    recovery_progress_tolerance: float = 0.35
+    minimum_motion_speed: float = 0.015
+    minimum_match_score: float = 0.55
+    match_margin: float = 0.15
+    roi_exit_observations: int = 3
+    max_sessions: int = 256
+    history_size: int = 8
+    count_lost_gap: bool = False
+    diagnostics: bool = False
+
+    def __post_init__(self):
+        for name in ('grace_period_seconds', 'motion_recovery_seconds', 'recovery_confirm_seconds',
+                     'recovery_confirmation_window_seconds', 'active_position_tolerance',
+                     'recovery_position_tolerance', 'minimum_motion_speed'):
+            value = getattr(self, name)
+            if not math.isfinite(value) or value <= 0:
+                raise ValueError(f'{name} must be positive and finite')
+        if self.motion_recovery_seconds > self.grace_period_seconds:
+            raise ValueError('Recovery window must not exceed session retention')
+        if self.recovery_confirm_seconds > self.recovery_confirmation_window_seconds:
+            raise ValueError('Confirmation must fit within its window')
+        for name, low, high in (('recovery_confirm_observations', 2, 30), ('roi_exit_observations', 2, 30),
+                                ('max_sessions', 2, 2048), ('history_size', 3, 32)):
+            value = getattr(self, name)
+            if type(value) is not int or not low <= value <= high:
+                raise ValueError(f'{name} outside supported range')
+        if any(not math.isfinite(v) or not 0 < v < 1 for v in (self.minimum_match_score, self.match_margin, self.recovery_progress_tolerance)):
+            raise ValueError('Session score and margin must be in (0,1)')
+        if type(self.count_lost_gap) is not bool or type(self.diagnostics) is not bool:
+            raise ValueError('Session flags must be boolean')
+
+
+@dataclass(frozen=True)
 class Settings:
     site_name: str = "Local pilot"
     camera_id: str = "camera-1"
@@ -72,6 +113,7 @@ class Settings:
     read_timeout_seconds: float = 5
     rules: Rules = field(default_factory=Rules)
     zones: tuple[Zone, ...] = ()
+    sessions: SessionRules = field(default_factory=SessionRules)
 
     def __post_init__(self):
         ZoneInfo(self.timezone)
@@ -107,5 +149,6 @@ def load_settings(path: Path) -> Settings:
     if "database" in values:
         values["database"] = Path(values["database"]).expanduser().resolve()
     values["rules"] = Rules(**values.get("rules", {}))
+    values["sessions"] = SessionRules(**values.get("sessions", {}))
     values["zones"] = tuple(Zone(**{**z, "polygon": tuple(tuple(p) for p in z["polygon"])}) for z in values.get("zones", []))
     return Settings(**values)

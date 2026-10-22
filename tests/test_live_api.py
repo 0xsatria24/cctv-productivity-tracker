@@ -46,7 +46,14 @@ def test_authenticated_live_calibration_frame_report_csv_and_registry(tmp_path, 
             assert result.json()['recorded'] is True
             time.sleep(0.15)
         assert client.post('/pilot/v1/webcam/frame', content=jpeg, headers={**frame_headers, 'X-Frame-Sequence': '3'}).status_code == 422
-        assert client.get('/pilot/v1/live/preview.jpg', headers=headers).status_code == 200
+        preview = client.get('/pilot/v1/live/preview.jpg', headers=headers)
+        assert preview.status_code == 200
+        latest = result.json()
+        assert preview.headers['X-Frame-Sequence'] == str(latest['frame_seq'])
+        assert preview.headers['X-Run-Id'] == latest['run_id']
+        assert preview.headers['X-Mapping-Version'] == str(latest['mapping_version'])
+        assert client.get('/pilot/v1/live/preview.jpg', params={'frame_seq': latest['frame_seq'], 'run_id': 'retired-run'}, headers=headers).status_code == 404
+        assert client.get('/pilot/v1/live/preview.jpg', params={'frame_seq': latest['frame_seq'] - 1, 'run_id': latest['run_id']}, headers=headers).status_code == 200
         report = client.get('/pilot/v1/reports?dataset=live', headers=headers).json()
         assert report['data_sources'] == ['WEBCAM_LIVE']
         assert report['workstations'][0]['empty_us'] > 0

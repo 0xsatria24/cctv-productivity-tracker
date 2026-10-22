@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { clock, duration, percent, summarize, atDate, DAY, dateKey } from './domain';
 import { Button, Empty, Field, Status } from './components';
 
@@ -32,8 +32,9 @@ export function TrendChart({ rows, onSelect }) {
   </div>;
 }
 export function DurationBars({ rows, onSelect, max = 6 }) {
+  const descriptionId=useId();
   return <div className="duration-bars"><div className="chart-legend">{[['occupied','Terisi'],['empty','Kosong'],['unknown','Tidak diketahui']].map(([key,label]) => <span key={key}><span className={`legend-swatch ${key}`}/>{label}</span>)}<span className="caption">Satuan: jam-workstation</span></div>
-    {!rows.length ? <Empty/> : rows.slice(0,max).map(row => <button className="bar-row" key={row.id} onClick={() => onSelect(row)} aria-label={`Buka analitik ${row.name}`}><span>{row.name}</span><span className="stacked-track">{['occupied','empty','unknown'].map(key => row[key] > 0 && <span key={key} className={`stacked-segment ${key}`} style={{width: `${100*row[key]/row.eligible}%`}} title={`${key}: ${duration(row[key],true)}`}/>)}</span><span className="numeric">{percent(row.utilization)}</span></button>)}
+    {!rows.length ? <Empty/> : rows.slice(0,max).map(row => <button className="bar-row" key={row.id} onClick={() => onSelect(row)} aria-label={`Buka analitik ${row.name}`} aria-describedby={`${descriptionId}-${row.id}`}><span>{row.name}</span><span className="stacked-track" aria-hidden="true">{['occupied','empty','unknown'].map(key => row[key] > 0 && <span key={key} className={`stacked-segment ${key}`} style={{width: `${100*row[key]/row.eligible}%`}}/>)}</span><span className="numeric">{percent(row.utilization)}</span><span className="bar-durations" id={`${descriptionId}-${row.id}`}>Terisi {duration(row.occupied,true)} · Kosong {duration(row.empty,true)} · Tidak diketahui {duration(row.unknown,true)} · Keterisian {percent(row.utilization)}</span></button>)}
   </div>;
 }
 export function Heatmap({ intervals, endDate }) {

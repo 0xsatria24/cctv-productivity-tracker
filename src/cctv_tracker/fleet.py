@@ -64,6 +64,13 @@ class ManagedCamera:
 
 
 class CameraFleet(CameraWall):
+    def source_url(self, camera_id):
+        with self._lock:
+            camera = self._cameras.get(camera_id)
+            if camera is None:
+                raise LookupError('Kamera tidak ditemukan')
+            return camera.record['url']
+
     def __init__(self, settings, detector, *, capture_factory=RtspCapture, lease_seconds=12):
         super().__init__(settings, capture_factory=capture_factory, lease_seconds=lease_seconds)
         self.root = settings.database.parent / (settings.database.stem + '-fleet')

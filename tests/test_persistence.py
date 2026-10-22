@@ -19,10 +19,10 @@ def test_migration_is_repeatable_and_resources_unchanged(tmp_path):
     path = tmp_path / "tracker.sqlite3"
     for _ in range(2):
         with closing(Database(path)) as db:
-            assert db.conn.execute("PRAGMA user_version").fetchone()[0] == 3
+            assert db.conn.execute("PRAGMA user_version").fetchone()[0] == 4
             assert db.conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
             assert db.conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
-            assert db.conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0] == 3
+            assert db.conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0] == 4
             assert db.conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
 
 
@@ -48,13 +48,14 @@ def test_upgrade_v2_preserves_existing_data_and_checksums(tmp_path):
         with db.transaction() as conn:
             # Recreate an existing v2 database using only this disposable fixture.
             conn.execute('DROP TABLE live_calibrations')
-            conn.execute('DELETE FROM runtime_migration_checksums WHERE version=3')
-            conn.execute('DELETE FROM schema_migrations WHERE version=3')
+            conn.execute('DROP TABLE person_sessions')
+            conn.execute('DELETE FROM runtime_migration_checksums WHERE version>=3')
+            conn.execute('DELETE FROM schema_migrations WHERE version>=3')
             conn.execute('PRAGMA user_version=2')
     with closing(Database(path)) as db:
-        assert db.conn.execute('PRAGMA user_version').fetchone()[0] == 3
+        assert db.conn.execute('PRAGMA user_version').fetchone()[0] == 4
         assert db.conn.execute('SELECT display_name FROM employees WHERE id=?', (employee,)).fetchone()[0] == 'Migration fixture'
-        assert db.conn.execute('SELECT COUNT(*) FROM runtime_migration_checksums').fetchone()[0] == 3
+        assert db.conn.execute('SELECT COUNT(*) FROM runtime_migration_checksums').fetchone()[0] == 4
 
 
 def test_same_model_weights_retain_different_execution_runtime_per_run(tmp_path):

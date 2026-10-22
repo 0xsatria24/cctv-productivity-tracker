@@ -1,0 +1,48 @@
+@media (max-width: 760px), (any-pointer: coarse) {
+  :root .app-shell button:not(.timeline-segment),
+  :root .app-shell summary,
+  :root .app-shell input:not([type=checkbox]):not([type=radio]),
+  :root .app-shell select,
+  :root .app-shell textarea,
+  :root .app-shell label:has(> input[type=checkbox]),
+  :root .app-shell label:has(> input[type=radio]) {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  :root .app-shell .icon-button {
+    width: 44px;
+    height: 44px;
+    flex-shrink: 0;
+  }
+
+  :root .app-shell .camera-grid.layout-9 .stream-placeholder .button {
+    min-height: 44px;
+  }
+
+  :root .app-shell .table-sort {
+    text-align: start;
+  }
+
+  :root .app-shell .text-button,
+  :root .app-shell .legend-control,
+  :root .app-shell .overlay-controls label {
+    padding: 8px;
+  }
+
+  :root .app-shell .table-pagination > div,
+  :root .app-shell .inline-controls,
+  :root .app-shell .header-actions {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+}
+
+@media (max-width: 760px) {
+  .metric-strip > .metric-help {
+    position: static;
+    align-self: center;
+    justify-self: end;
+    margin: 4px 8px;
+  }
+}

@@ -41,8 +41,8 @@ export function useLiveEngine(webcam, engine) {
     catch (failure) { setError(failure.message); throw failure; }
     finally { setBusy(false); }
   }
-  async function start(source, url, preview = false) {
-    const value = await action('start', { source, ...(url ? { url } : {}), preview_only: preview, camera_key: source === 'WEBCAM_LIVE' ? cameraKey : undefined });
+  async function start(source, url, preview = false, cameraId) {
+    const value = await action('start', { source, ...(cameraId ? {camera_id:cameraId} : url ? { url } : {}), preview_only: preview, camera_key: source === 'WEBCAM_LIVE' ? cameraKey : undefined });
     setOwnedSession(value.session_id);
     if (!preview) engine.setDataset('live');
     return value;
@@ -57,18 +57,21 @@ export function useLiveEngine(webcam, engine) {
     webcamStarting: !!ownedSession && state?.source === 'WEBCAM_LIVE' && state?.status === 'STARTING' };
 }
 
-export function LiveEnginePanel({ live, webcam, engine, onReports, hidePreview = false }) {
-  const [source, setSource] = useState('WEBCAM_LIVE'), [url, setUrl] = useState(''), [testedUrl, setTestedUrl] = useState('');
+export function LiveEnginePanel({ live, webcam, engine, onReports, hidePreview = false, cameras = [], selected = 'webcam', onSelect, onAdd }) {
+  const selectedCamera=cameras.find(c=>c.id===selected)||{id:'webcam',name:'Webcam lokal'};
+  const camera=live.active?(cameras.find(c=>live.state?.source==='WEBCAM_LIVE'?c.id==='webcam':c.camera_key===live.state?.camera_key)||selectedCamera):selectedCamera;
+  const source=camera.id==='webcam'?'WEBCAM_LIVE':'RTSP_LIVE';
+  const sourceError=live.state?.source===source&&(source==='WEBCAM_LIVE'||live.state?.camera_key===camera.camera_key)?live.state?.error:null;
   const [step, setStep] = useState(1), [calibration, setCalibration] = useState(null), [notice, setNotice] = useState('');
   const working = live.busy || ['STARTING', 'STOPPING'].includes(live.state?.status);
   const recording = live.active && !live.state?.preview_only;
-  const connected = source === 'WEBCAM_LIVE' ? webcam.status === 'LIVE' : live.active && live.state?.source === 'RTSP_LIVE' && live.state.camera_health === 'ONLINE' && (!url || testedUrl === url);
-  const key = source === 'WEBCAM_LIVE' ? live.cameraKey : live.state?.source === 'RTSP_LIVE' ? live.state.camera_key : null;
+  const connected = source === 'WEBCAM_LIVE' ? webcam.status === 'LIVE' : live.active && live.state?.source === 'RTSP_LIVE' && live.state.camera_health === 'ONLINE' && camera.camera_key===live.state.camera_key;
+  const key = source === 'WEBCAM_LIVE' ? live.cameraKey : camera.camera_key;
   const profile = live.state?.calibrations?.[source];
   const width = source === 'WEBCAM_LIVE' ? webcam.width : live.state?.latest?.width;
   const height = source === 'WEBCAM_LIVE' ? webcam.height : live.state?.latest?.height;
   const validProfile = !!profile && !!key && profile.camera_key === key && (!width || !height || Math.abs(width / height - profile.width / profile.height) <= 0.02);
-  useEffect(() => { if (live.active && live.state?.source) setSource(live.state.source); }, [live.active, live.state?.source]);
+  useEffect(() => { if(!live.active){setStep(1);setNotice('');} }, [camera.id]);
   useEffect(() => { if (recording) setStep(4); else if (step === 2 && connected) setStep(validProfile ? 4 : 3); }, [recording, connected, validProfile, step]);
   async function stopAndWait() {
     await live.stop();
@@ -85,7 +88,7 @@ export function LiveEnginePanel({ live, webcam, engine, onReports, hidePreview =
     setNotice('');
     try {
       if (source === 'WEBCAM_LIVE') await webcam.start();
-      else { await live.start(source, url, true); setTestedUrl(url); }
+      else { await live.start(source, null, true, camera.id); }
     } catch (failure) { setNotice(failure.message); }
   }
   async function calibrate() {
@@ -107,7 +110,7 @@ export function LiveEnginePanel({ live, webcam, engine, onReports, hidePreview =
     try {
       if (!validProfile) throw new Error('Atur dan simpan zona untuk kamera ini terlebih dahulu.');
       if (live.active && live.state?.preview_only) await stopAndWait();
-      await live.start(source, url, false); engine.toast('Sesi monitoring dimulai. Menunggu konfirmasi observasi zona.');
+      await live.start(source, null, false, source==='RTSP_LIVE'?camera.id:undefined); engine.toast('Sesi monitoring dimulai. Menunggu konfirmasi observasi zona.');
     } catch (failure) { setNotice(failure.message); }
   }
   const completed = [true, connected, validProfile, recording];
@@ -115,11 +118,11 @@ export function LiveEnginePanel({ live, webcam, engine, onReports, hidePreview =
   return <Panel title="Setup monitoring" caption="Ikuti langkah berikut untuk menghasilkan catatan workstation." className="live-engine-panel setup-panel" action={<Status value={recording && live.state?.camera_health === 'ONLINE' ? 'ONLINE' : live.state?.status === 'FAILED' ? 'OFFLINE' : 'DISABLED'} label={monitoringText(live.state, live.error)}/>}>
     <ol className="setup-progress">{steps.map((label, i) => <li key={label}><button type="button" aria-current={step === i + 1 ? 'step' : undefined} disabled={recording && i < 3} onClick={() => setStep(i + 1)}><span>{completed[i] && i > 0 ? <Check size={14}/> : i + 1}</span><strong>{label}</strong><small>{i === 0 ? source === 'WEBCAM_LIVE' ? 'Webcam lokal' : 'Kamera RTSP' : completed[i] ? 'Selesai' : 'Belum selesai'}</small></button></li>)}</ol>
     <div className="setup-step-content" aria-busy={working}>
-      {step === 1 && <><h3>1. Pilih sumber kamera</h3><p>Webcam untuk mencoba perangkat lokal, atau RTSP untuk kamera CCTV/NVR.</p><Field label="Sumber pencatatan"><select value={source} disabled={live.active || working} onChange={e => { setSource(e.target.value); setNotice(''); }}><option value="WEBCAM_LIVE">Webcam browser</option><option value="RTSP_LIVE">CCTV RTSP</option></select></Field>{source === 'WEBCAM_LIVE' ? <Field label="Kamera untuk monitoring"><select value={webcam.device} disabled={!!webcam.stream} onChange={e => webcam.setDevice(e.target.value)}><option value="">Kamera default sistem</option>{webcam.devices.filter(d => d.deviceId).map((d, i) => <option key={d.deviceId} value={d.deviceId}>{d.label || `Webcam ${i + 1}`}</option>)}</select></Field> : <Field label="URL RTSP" hint="Kredensial hanya digunakan selama sesi dan tidak disimpan ke laporan."><input type="password" autoComplete="off" value={url} disabled={live.active} placeholder="rtsp://user:password@kamera:554/stream" onChange={e => { setUrl(e.target.value); setTestedUrl(''); }}/></Field>}<Button variant="primary" disabled={source === 'RTSP_LIVE' && !url} onClick={() => setStep(2)}>Lanjut ke cek koneksi</Button></>}
-      {step === 2 && <><h3>2. Pastikan gambar kamera tersedia</h3><p>{connected ? 'Kamera terhubung. Lanjutkan untuk menentukan batas workstation.' : source === 'WEBCAM_LIVE' ? 'Hubungkan webcam dan izinkan akses kamera di browser. Gambar tampil pada grid di atas.' : 'Uji stream RTSP. Tunggu gambar baru dan status kamera terhubung.'}</p><Status value={connected ? 'ONLINE' : 'DISABLED'} label={connected ? 'Gambar kamera tersedia' : working ? 'Menghubungkan dan menyiapkan analisis' : 'Menunggu koneksi'}/>{!connected && <Button variant="primary" disabled={working || live.active || (source === 'RTSP_LIVE' && !url) || ['REQUESTING', 'CANCELLING'].includes(webcam.status)} onClick={connect}>{source === 'WEBCAM_LIVE' ? 'Hubungkan webcam' : 'Uji preview RTSP'}</Button>}<Button disabled={!connected} onClick={() => setStep(validProfile ? 4 : 3)}>Lanjut ke zona</Button></>}
+      {step === 1 && <><h3>1. Pilih sumber kamera</h3><Field label="Kamera untuk monitoring"><select value={camera.id} disabled={live.active||working} onChange={e=>onSelect(e.target.value)}>{cameras.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></Field><p>Sumber yang sama digunakan untuk preview, zona, dan pencatatan. Analisis durasi memproses satu kamera aktif.</p>{source==='WEBCAM_LIVE'&&<Field label="Perangkat webcam"><select value={webcam.device} disabled={!!webcam.stream} onChange={e=>webcam.setDevice(e.target.value)}><option value="">Kamera default sistem</option>{webcam.devices.filter(d=>d.deviceId).map((d,i)=><option key={d.deviceId} value={d.deviceId}>{d.label||`Webcam ${i+1}`}</option>)}</select></Field>}<div className="inline-controls"><Button variant="primary" onClick={()=>setStep(2)}>Lanjut ke cek koneksi</Button><Button onClick={onAdd}>Tambah kamera RTSP</Button></div></>}
+      {step === 2 && <><h3>2. Pastikan gambar kamera tersedia</h3><p>{camera.name}. {connected?'Kamera terhubung. Lanjutkan untuk menentukan batas workstation.':source==='WEBCAM_LIVE'?'Hubungkan webcam dan izinkan akses kamera di browser. Gambar tampil pada grid di bawah.':'Uji sumber RTSP yang dipilih dari daftar. Tunggu gambar baru dan status terhubung.'}</p><Status value={connected?'ONLINE':'DISABLED'} label={connected?'Gambar kamera tersedia':working?'Menghubungkan dan menyiapkan analisis':'Menunggu koneksi'}/>{!connected&&<Button variant="primary" disabled={working||live.active||['REQUESTING','CANCELLING'].includes(webcam.status)} onClick={connect}>{source==='WEBCAM_LIVE'?'Hubungkan webcam':'Uji preview RTSP'}</Button>}<div className="inline-controls"><Button disabled={!connected} onClick={()=>setStep(validProfile?4:3)}>Lanjut ke zona</Button>{live.state?.preview_only&&<Button disabled={working} onClick={()=>stopAndWait().catch(failure=>setNotice(failure.message))}>Hentikan preview</Button>}</div></>}
       {step === 3 && <><h3>3. Tentukan zona workstation</h3><p>{validProfile ? `${profile.zones.length} zona tersimpan untuk kamera ini. Ubah jika posisi kamera atau workstation berubah.` : profile ? key ? 'Kalibrasi tersimpan belum sesuai dengan kamera atau rasio gambar ini. Atur ulang zona.' : 'Hubungkan kamera untuk memeriksa kalibrasi yang tersimpan.' : 'Gambar batas area orang berada di workstation. Nama setiap zona akan muncul pada laporan.'}</p><Button variant="primary" disabled={working || recording || !connected} onClick={calibrate}>Atur zona</Button>{validProfile && <Button onClick={() => setStep(4)}>Lanjut ke monitoring</Button>}{!connected && <Button onClick={() => setStep(2)}>Kembali ke cek koneksi</Button>}</>}
-      {step === 4 && <><h3>{recording ? '4. Monitoring berjalan' : '4. Mulai sesi monitoring'}</h3><p>{recording ? 'Observasi zona disimpan otomatis. Kamera yang kehilangan bukti akan ditandai tidak diketahui.' : validProfile ? `${profile.zones.length} zona siap. Durasi mulai dicatat setelah sesi berjalan dan bukti kamera dikonfirmasi.` : 'Lengkapi koneksi dan kalibrasi zona sebelum memulai.'}</p><div className="inline-controls"><Button variant="primary" disabled={working || recording || !validProfile || (source === 'WEBCAM_LIVE' && !webcam.stream) || (source === 'RTSP_LIVE' && !url)} onClick={begin}>{working && live.state?.status === 'STARTING' ? 'Menyiapkan monitoring...' : 'Mulai monitoring'}</Button><Button disabled={!live.active || working} onClick={() => stopAndWait().then(() => engine.toast('Sesi monitoring dihentikan; catatan yang tersimpan tetap tersedia.')).catch(failure => setNotice(failure.message))}>Hentikan monitoring</Button><Button onClick={onReports || (() => engine.setDataset('live'))}>Lihat laporan live</Button></div>{!validProfile && <Button onClick={() => setStep(3)}>Lengkapi zona</Button>}</>}
-      {(notice || live.error || live.state?.error) && <p role="alert" className="error-text">{notice || live.error || live.state?.error}</p>}
+      {step === 4 && <><h3>{recording ? '4. Monitoring berjalan' : '4. Mulai sesi monitoring'}</h3><p>{camera.name}. {recording ? 'Observasi zona disimpan otomatis. Kamera yang kehilangan bukti akan ditandai tidak diketahui.' : validProfile ? `${profile.zones.length} zona siap. Durasi mulai dicatat setelah sesi berjalan dan bukti kamera dikonfirmasi.` : 'Lengkapi koneksi dan kalibrasi zona sebelum memulai.'}</p><div className="inline-controls"><Button variant="primary" disabled={working || recording || !validProfile || (source === 'WEBCAM_LIVE' && !webcam.stream)} onClick={begin}>{working && live.state?.status === 'STARTING' ? 'Menyiapkan monitoring...' : 'Mulai monitoring'}</Button><Button disabled={!live.active || working} onClick={() => stopAndWait().then(() => engine.toast('Sesi monitoring dihentikan; catatan yang tersimpan tetap tersedia.')).catch(failure => setNotice(failure.message))}>Hentikan monitoring</Button><Button onClick={onReports || (() => engine.setDataset('live'))}>Lihat laporan live</Button></div>{!validProfile && <Button onClick={() => setStep(3)}>Lengkapi zona</Button>}</>}
+      {(notice || live.error || sourceError) && <p role="alert" className="error-text">{notice || live.error || sourceError}</p>}
       {live.state?.run_id && <p className="caption">Sesi {live.state.run_id.slice(0, 8)} · {live.state.processed} observasi tersimpan. Rekaman video diatur terpisah di Pengaturan.</p>}
     </div>
     {live.state?.latest?.zones && <div className="live-zone-states">{live.state.latest.zones.map(z => <div key={z.id}><strong>{z.name}</strong><Status value={z.state}/><span>{z.count == null ? 'Jumlah belum dapat dipastikan' : `${z.count} orang teramati`} · {seconds(z.evidence_until_utc_us - z.state_since_utc_us)} pada status ini</span>{z.reason && <small>{reasonText(z.reason)}</small>}</div>)}</div>}

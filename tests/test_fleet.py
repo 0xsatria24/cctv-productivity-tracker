@@ -166,10 +166,14 @@ def test_multi_api_auth_camera_report_and_backup(tmp_path, monkeypatch):
         wait_for(lambda: all(c['engine']['processed'] > 4 for c in client.get('/pilot/v1/camera-wall', headers=auth).json()['cameras']))
         for camera in ids:
             query = f'dataset=live&camera_id={camera}'
+            duplicate = client.post('/pilot/v1/live/start', headers=auth, json={'source':'RTSP_LIVE','camera_id':camera,'preview_only':True})
+            assert duplicate.status_code == 409
             report = client.get('/pilot/v1/reports?' + query, headers=auth).json()
             assert report['workstations'][0]['occupied_us'] > 0
             assert client.get('/pilot/v1/status?' + query, headers=auth).json()['selected_camera_id'] == camera
             assert camera in client.get('/pilot/v1/export.csv?' + query, headers=auth).text
+            daily = client.get('/pilot/v1/export.csv?' + query + '&daily=true', headers=auth)
+            assert daily.status_code == 200 and daily.text.startswith('CCTV DAILY')
             assert client.get(f'/pilot/v1/camera-wall/cameras/{camera}/observation').status_code == 401
             assert client.get(f'/pilot/v1/camera-wall/cameras/{camera}/observation', headers=auth).json()['observation']['recorded']
         assert client.get('/pilot/v1/reports?dataset=live&camera_id=../../private', headers=auth).status_code == 404

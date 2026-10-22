@@ -1,5 +1,6 @@
 """One active live source, one accounting thread, separate live SQLite history."""
 from concurrent.futures import Future
+from collections import deque
 from contextlib import closing
 from dataclasses import asdict, replace
 import copy
@@ -57,6 +58,7 @@ class LiveController:
         self.profiles = {}
         self.last_submitted = 0
         self.preview = None
+        self.preview_history = deque(maxlen=8)
         self.state = {'status': 'IDLE', 'source': None, 'session_id': None, 'run_id': None, 'camera_health': 'OFFLINE', 'processed': 0, 'error': None, 'latest': None}
         with closing(Database(self.settings.database)) as db:
             for row in db.conn.execute('SELECT * FROM live_calibrations'):
@@ -112,12 +114,14 @@ class LiveController:
             if not preview_only and camera_key != profile['camera_key']:
                 raise ValueError('Kamera berbeda dari kalibrasi tersimpan. Kalibrasikan kamera ini terlebih dahulu')
             zones, rules = validate_calibration({k: v for k, v in profile.items() if k != 'revision'}) if profile else ((), Rules(max_evidence_gap_seconds=3))
-            config = replace(self.settings, camera_id=source.lower() + '-primary', zones=zones, rules=rules,
+            camera_id = self.settings.camera_id if self.settings.camera_id != 'camera-1' else source.lower() + '-primary'
+            config = replace(self.settings, camera_id=camera_id, zones=zones, rules=rules,
                              frame_stale_seconds=rules.max_evidence_gap_seconds)
             session = str(uuid4())
             self.stop_event.clear()
             self.last_submitted = 0
             self.preview = None
+            self.preview_history.clear()
             self._update(status='STARTING', source=source, session_id=session, run_id=None, camera_health='RECONNECTING', processed=0, error=None, latest=None, preview_only=preview_only, camera_key=camera_key, worker_heartbeat_ns=time.perf_counter_ns())
             self.thread = Thread(target=self._run, args=(config, profile, source, session, url, preview_only), name='live-occupancy', daemon=False)
             self.thread.start()
@@ -154,20 +158,24 @@ class LiveController:
         return future.result(timeout=10)
 
     def preview_jpeg(self):
-        with self.lock:
-            value = self.preview
-        if not value or time.perf_counter_ns() - value[0] > 3e9:
-            return None
-        return value[1]
+        snapshot = self.preview_snapshot()
+        return snapshot['jpeg'] if snapshot else None
 
-    def preview_snapshot(self):
+    def preview_snapshot(self, frame_seq=None, run_id=None):
         """Image and detection belong to the same committed frame."""
         with self.lock:
-            if not self.preview or time.perf_counter_ns() - self.preview[0] > 3e9:
+            value = next((frame for frame in reversed(self.preview_history)
+                          if str(frame[4].get('X-Frame-Sequence')) == str(frame_seq)
+                          and (run_id is None or frame[4].get('X-Run-Id') == run_id)), None) if frame_seq is not None else self.preview
+            if not value or time.perf_counter_ns() - value[0] > 3e9:
                 return None
-            return {'jpeg': self.preview[1], 'observation': copy.deepcopy(self.state.get('latest')),
-                    'utc_ms': self.preview[2], 'sequence': self.state['processed'],
-                    'monotonic_ns': self.preview[3], 'published_monotonic_ns': self.preview[0]}
+            return {'jpeg': value[1], 'observation': copy.deepcopy(value[5]), 'headers': dict(value[4]),
+                    'utc_ms': value[2], 'sequence': value[5].get('processed', self.state['processed']),
+                    'monotonic_ns': value[3], 'published_monotonic_ns': value[0]}
+
+    def preview_frame(self, frame_seq=None, run_id=None):
+        snapshot = self.preview_snapshot(frame_seq, run_id)
+        return (snapshot['jpeg'], snapshot['headers']) if snapshot else None
 
     def _run(self, config, profile, source, session, url, preview_only):
         from .activity import TrackActivity
@@ -261,6 +269,8 @@ class LiveController:
                             raise ValueError('Rasio frame berubah. Hentikan sesi dan kalibrasikan ulang zona')
                         if time.perf_counter_ns() - mono > config.frame_stale_seconds * 1e9:
                             raise ValueError('Inferensi terlalu lambat; hasil tidak menjadi bukti')
+                        if self.stop_event.is_set():
+                            raise ValueError('Sesi telah berhenti; hasil inferensi diabaikan')
                         candidates = result.pop('tracking_candidates', result['detections'])
                         accounting = account([Detection(tuple(d['box']), d['confidence']) for d in candidates], mono)
                         last_valid = mono / 1e9; attempts = 0
@@ -285,7 +295,11 @@ class LiveController:
                         metrics['resources_available'] = bool(resources and resources.psutil is not None)
                         result.update(source=source, recorded=not preview_only, processed_monotonic_ns=time.perf_counter_ns())
                         with self.lock:
-                            self.preview = (time.perf_counter_ns(), item['jpeg'], (anchor_utc + (mono - anchor_mono) // 1000) // 1000, mono)
+                            headers = {'X-Frame-Sequence': str(accounting.get('frame_seq', '')),
+                                       'X-Run-Id': str(accounting.get('run_id', '')),
+                                       'X-Mapping-Version': str(accounting.get('mapping_version', ''))}
+                            self.preview = (time.perf_counter_ns(), item['jpeg'], (anchor_utc + (mono - anchor_mono) // 1000) // 1000, mono, headers, copy.deepcopy(result))
+                            self.preview_history.append(self.preview)
                             self.state.update(camera_health='ONLINE', error=None, processed=self.state['processed'] + 1, latest=result, performance=metrics)
                         if future and not future.done():
                             future.set_result(result)

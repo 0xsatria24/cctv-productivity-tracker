@@ -9,7 +9,7 @@
     "dev": "vite --host 127.0.0.1 --port 5173 --strictPort",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1 --port 4173 --strictPort",
-    "test": "node --test tests/domain.test.mjs tests/operations-domain.test.mjs tests/camera-layout.test.mjs",
+    "test": "node --test tests/domain.test.mjs tests/operations-domain.test.mjs tests/camera-layout.test.mjs tests/workflow.test.mjs",
     "test:e2e": "playwright test",
     "test:engine": "playwright test --config playwright.engine.config.js",
     "test:webcam": "playwright test --config playwright.webcam.config.js"

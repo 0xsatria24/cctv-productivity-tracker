@@ -1,0 +1,38 @@
+.mobile-camera-picker { display:none; }
+.report-source { display:flex; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:16px; }
+.report-source .field { width:200px; }
+.report-source p { flex:1; min-width:180px; font-size:12px; }
+.report-filter-controls>summary { cursor:pointer; color:var(--text-secondary); padding:8px 0; margin-bottom:8px; }
+.camera-session-controls { margin-bottom:16px; }
+.camera-monitoring-state { padding:8px 12px; background:var(--surface-sidebar); border-bottom:1px solid var(--border-subtle); }
+.camera-workspace-compact .camera-monitoring-state { display:none; }
+.engine-app .page-header { padding-block:12px; }
+.engine-app .page-header .eyebrow { display:none; }
+.engine-app .report-source p { font-size:12px; }
+.prototype-diagnostics { margin-top:24px; }
+
+@media(max-width:760px) {
+  .sidebar .brand small { display:none; }
+  .sidebar { padding:8px 12px; gap:8px; }
+  .sidebar nav { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); overflow:visible; gap:4px; }
+  .sidebar .nav-item { justify-content:center; padding:6px 4px; font-size:12px; gap:6px; white-space:normal; }
+  .sidebar .nav-item svg { flex-shrink:0; width:15px; }
+  .page-header,.engine-app .page-header { padding:8px 16px; }
+  .page-header .eyebrow,.page-header>div>p { display:none; }
+  .page-header h1 { font-size:21px; margin:4px 0; }
+  .header-actions:empty { display:none; }
+  .mobile-camera-picker { display:flex; flex:1; }
+  .camera-workspace .desktop-camera-controls,.camera-workspace .camera-directory,.camera-workspace .camera-mode-toolbar { display:none; }
+  .camera-workspace .camera-wall-grid { grid-template-columns:minmax(0,1fr); height:auto; min-height:320px; overflow:visible; }
+  .camera-workspace .camera-tile { min-height:320px; }
+  .camera-workspace-wall .camera-selection-bar { display:flex; }
+  .camera-workspace .camera-view-heading small { display:none; }
+  .camera-selection-bar .button { flex:1 1 120px; }
+  .camera-selection-bar p { min-width:0; flex-basis:100%; }
+  .report-source { align-items:flex-start; gap:8px; }
+  .report-source .field { width:100%; }
+  .report-source p { font-size:11px; }
+  .tab-bar { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); }
+  .tab-bar button { padding:6px 4px; font-size:12px; white-space:normal; }
+  .engine-app main { padding-top:12px; }
+}

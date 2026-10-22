@@ -19,7 +19,7 @@ export function Field({ label, hint, children, className = '' }) {
   const controls=Children.map(children,attach);
   return <div className={`field ${className}`}><label htmlFor={controlId}>{label}</label>{controls}{hint&&<small id={`${generatedId}-hint`}>{hint}</small>}</div>;
 }
-export function Empty({ title = 'Belum ada data', description = 'Tidak ada observasi simulasi untuk filter ini.', action }) { return <div className="empty-state"><h3>{title}</h3><p>{description}</p>{action}</div>; }
+export function Empty({ title = 'Belum ada data', description = 'Tidak ada data untuk pilihan ini. Ubah pilihan atau periode lalu coba lagi.', action }) { return <div className="empty-state"><h3>{title}</h3><p>{description}</p>{action}</div>; }
 export function MetricStrip({ metrics, small = false }) {
   const { setDialog } = usePrototype();
   return <div className={`metric-strip ${small ? 'compact' : ''}`}>

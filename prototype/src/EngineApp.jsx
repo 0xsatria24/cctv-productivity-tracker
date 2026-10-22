@@ -1,24 +1,27 @@
 import { useEffect, useRef, useState } from 'react';
-import { ChartNoAxesCombined, Download, FileText, LayoutDashboard, Play, RefreshCw, ScanLine, Settings, Square, Video } from 'lucide-react';
+import { ChartNoAxesCombined, Download, LayoutDashboard, Play, RefreshCw, ScanLine, Settings, Square, Video } from 'lucide-react';
 import { Button, DataTable, Empty, Field, Modal, Panel, Status } from './components';
 import { Timeline as BaseTimeline } from './charts';
 import { displayTime, inputUtc, parseUtc, ratio, seconds, totalMetrics, useEngine } from './engine-client';
 import { useWebcamPreview } from './webcam';
 import { LiveEnginePanel, useLiveEngine } from './live-engine';
-import { RecordingDestination } from './recording-destination';
-import { RecordingSettings, recordingLabel, useRecordings } from './recording-settings';
-import { MaintenancePanel } from './maintenance-panel';
 import { CameraWorkspace } from './camera-wall';
 import './engine.css';
 import { OperationalOverview, OperationalReports, ReportFilters, PeriodMetrics, DurationBreakdown } from './operations';
 import { reasonText, monitoringText } from './operations-domain.mjs';
+import DailyAnalytics from './DailyAnalytics';
+import { readRoute, routeHash } from './navigation.mjs';
+import { RecordingDestination } from './recording-destination';
+import { RecordingSettings, recordingLabel, useRecordings } from './recording-settings';
+import { MaintenancePanel } from './maintenance-panel';
+import { ManagedCameraControls } from './managed-camera';
 
-const sections=[['overview','Ringkasan',LayoutDashboard],['live','Pemantauan Live',Video],['workspaces','Workstation',ScanLine],['analytics','Analitik',ChartNoAxesCombined],['reports','Laporan',FileText],['settings','Pengaturan',Settings]];
-const pageFromHash=()=>{const key=window.location.hash.replace(/^#\/?/,'');return key==='cameras'?'live':sections.find(s=>s[0]===key)?.[0]||'overview';};
+const sections=[['overview','Ringkasan',LayoutDashboard],['live','Pemantauan Live',Video],['workspaces','Workstation',ScanLine],['analytics','Laporan',ChartNoAxesCombined],['settings','Pengaturan',Settings]];
+const pageFromHash=()=>readRoute(window.location.hash).page;
 const reportColumns=[{key:'workspace',label:'Workstation'},{key:'occupied_us',label:'Terisi',numeric:true,render:r=>seconds(r.occupied_us)},{key:'empty_us',label:'Kosong',numeric:true,render:r=>seconds(r.empty_us)},{key:'unknown_us',label:'Tidak diketahui',numeric:true,render:r=>seconds(r.unknown_us)},{key:'utilization',label:'Keterisian',numeric:true,render:r=>ratio(r.utilization)},{key:'coverage',label:'Kelengkapan',numeric:true,render:r=>ratio(r.coverage)}];
 const asRows=report=>(report?.workstations||[]).map(r=>({...r,id:r.workspace_id}));
 function Timeline(props){return <BaseTimeline {...props} gapDescription="Tidak diketahui berarti bukti kamera belum mencukupi."/>;}
-const reportDescriptions={overview:'Kondisi kamera saat ini dan ringkasan durasi workstation.',live:'Pantau beberapa kamera dan periksa observasi zona.',workspaces:'Zona tersimpan, data karyawan, dan assignment administratif.',analytics:'Telusuri kapan workstation terisi, kosong, atau belum dapat diamati.',reports:'Pilih periode, pahami kelengkapan data, lalu telusuri timeline atau ekspor laporan.',settings:'Koneksi aplikasi lokal dan kemampuan runtime pilot.'};
+const reportDescriptions={overview:'Kondisi kamera saat ini dan hal yang perlu ditindaklanjuti.',live:'Pantau beberapa kamera dan periksa observasi zona.',workspaces:'Zona tersimpan, data karyawan, dan assignment administratif.',analytics:'Durasi, rekap harian, timeline dan ekspor dalam satu periode.',settings:'Koneksi aplikasi lokal dan kemampuan runtime pilot.'};
 
 function EventTable({engine,onInspect}){return <DataTable testId="engine-events" rows={(engine.snapshot?.events||[]).map(row=>({...row,id:row.event_id}))} columns={[{key:'seq',label:'No. catatan',numeric:true},{key:'event_type',label:'Event'},{key:'observed_utc_us',label:'Waktu observasi',render:r=>displayTime(r.observed_utc_us,engine.snapshot?.timezone)},{key:'frame_seq',label:'Frame',numeric:true},{key:'zone_states',label:'Observasi zona',render:r=>Object.entries(r.zone_states).map(([id,state])=>`${id}: ${state}`).join(' · ')},{key:'details',label:'Detail',sortable:false,render:r=><Button onClick={()=>onInspect({type:'event',value:r})}>Periksa</Button>}]}/>;}
 
@@ -39,11 +42,62 @@ function Live({engine,setModal}) {
   </details>;
 }
 
-function Analytics({engine,setModal,tab,setTab}){const selected=engine.snapshot?.workspaces.filter(w=>engine.filters.workspace==='ALL'||w.id===engine.filters.workspace)||[];return <><PeriodMetrics report={engine.report} loading={engine.reportLoading}/><div className="tab-bar"><button aria-pressed={tab==='summary'} onClick={()=>setTab('summary')}>Ringkasan</button><button aria-pressed={tab==='timeline'} onClick={()=>setTab('timeline')}>Timeline</button></div>{tab==='summary'?<><Panel title="Durasi dan kelengkapan observasi" caption="Rasio dihitung dari total durasi"><DurationBreakdown report={engine.report} onSelect={id=>engine.setFilters(p=>({...p,workspace:id}))}/></Panel><Panel className="section-gap" title="Rincian workstation"><DataTable columns={reportColumns} rows={asRows(engine.report)} testId="engine-analytics"/></Panel></>:engine.report?.intervals.length?<><Panel title="Timeline observasi" caption="Waktu tanpa bukti kamera ditampilkan sebagai tidak diketahui"><Timeline timezone={engine.snapshot.timezone} records={engine.report.intervals} workspaces={selected} start={engine.report.start_utc_us/1000} end={engine.report.end_utc_us/1000} onSelect={value=>setModal({type:'interval',value})}/></Panel><Panel className="section-gap" title="Detail interval"><DataTable testId="engine-intervals" rows={engine.report.intervals} columns={[{key:'workspaceId',label:'Workstation',render:r=>selected.find(w=>w.id===r.workspaceId)?.name||r.workspaceId},{key:'start',label:'Mulai',render:r=>displayTime(r.start*1000,engine.snapshot.timezone)},{key:'end',label:'Akhir',render:r=>displayTime(r.end*1000,engine.snapshot.timezone)},{key:'state',label:'Observasi',render:r=><Status value={r.state}/>},{key:'reason',label:'Alasan',render:r=>reasonText(r.reason)},{key:'detail',label:'Detail',sortable:false,render:r=><Button onClick={()=>setModal({type:'interval',value:r})}>Periksa</Button>}]}/></Panel></>:<Empty title="Belum ada interval untuk rentang ini" description="Gunakan run tersimpan atau jalankan replay."/>}</>;}
+function Analytics({engine,setModal,tab,setTab}) {
+  const selected=engine.snapshot?.workspaces.filter(w=>engine.filters.workspace==='ALL'||w.id===engine.filters.workspace)||[];
+  function openTimeline(workspace) {
+    engine.setFilters(previous=>({...previous,workspace}));
+    setTab('timeline');
+  }
+  return <>
+    <PeriodMetrics report={engine.report} loading={engine.reportLoading}/>
+    <div className="tab-bar">
+      <button aria-pressed={tab==='summary'} onClick={()=>setTab('summary')}>Ringkasan</button>
+      <button aria-pressed={tab==='daily'} onClick={()=>setTab('daily')}>Rekap Harian</button>
+      <button aria-pressed={tab==='timeline'} onClick={()=>setTab('timeline')}>Timeline</button>
+      <button aria-pressed={tab==='export'} onClick={()=>setTab('export')}>Ekspor</button>
+    </div>
+    {tab==='export'?<OperationalReports engine={engine} showMetrics={false} onTimeline={openTimeline}/>:tab==='daily'?<DailyAnalytics engine={engine} onTimeline={row=>{engine.setFilters({workspace:row.workspace_id,start:row.start_utc_us,end:row.end_utc_us});setTab('timeline');}}/>:tab==='summary'?<>
+      <Panel title="Durasi dan kelengkapan observasi" caption="Rasio dihitung dari total durasi"><DurationBreakdown report={engine.report} onSelect={openTimeline}/></Panel>
+      <Panel className="section-gap" title="Rincian workstation"><DataTable columns={reportColumns} rows={asRows(engine.report)} testId="engine-analytics" empty={<Empty title="Belum ada observasi pada periode ini" description={engine.dataset==='live'?'Pilih periode lain atau mulai monitoring dari Pemantauan Live.':'Pilih sesi simulasi yang memiliki observasi atau jalankan replay.'}/>}/></Panel>
+    </>:engine.report?.intervals.length?<>
+      <Panel title="Timeline observasi" caption="Waktu tanpa bukti kamera ditampilkan sebagai tidak diketahui"><Timeline timezone={engine.snapshot.timezone} records={engine.report.intervals} workspaces={selected} start={engine.report.start_utc_us/1000} end={engine.report.end_utc_us/1000} onSelect={value=>setModal({type:'interval',value})}/></Panel>
+      <Panel className="section-gap" title="Detail interval"><DataTable testId="engine-intervals" rows={engine.report.intervals} columns={[{key:'workspaceId',label:'Workstation',render:r=>selected.find(w=>w.id===r.workspaceId)?.name||r.workspaceId},{key:'start',label:'Mulai',render:r=>displayTime(r.start*1000,engine.snapshot.timezone)},{key:'end',label:'Akhir',render:r=>displayTime(r.end*1000,engine.snapshot.timezone)},{key:'state',label:'Observasi',render:r=><Status value={r.state}/>},{key:'reason',label:'Alasan',render:r=>reasonText(r.reason)},{key:'detail',label:'Detail',sortable:false,render:r=><Button onClick={()=>setModal({type:'interval',value:r})}>Periksa</Button>}]}/></Panel>
+    </>:<Empty title="Belum ada interval untuk rentang ini" description={engine.dataset==='live'?'Pilih periode lain atau mulai monitoring dari Pemantauan Live.':'Pilih sesi simulasi yang memiliki observasi atau jalankan replay.'}/>}
+  </>;
+}
 
-function Workstations({engine,setModal}){return <><Panel title="Zona workstation" caption="Konfigurasi yang tersimpan di SQLite"><DataTable testId="engine-workspaces" rows={engine.snapshot?.workspaces||[]} columns={[{key:'name',label:'Workstation'},{key:'kind',label:'Jenis'},{key:'revision',label:'Revisi',numeric:true},{key:'exclusive_group',label:'Kelompok eksklusif'},{key:'polygon',label:'Zona',sortable:false,render:r=><Button onClick={()=>setModal({type:'zone',value:r})}>Lihat polygon</Button>}]}/></Panel><Panel className="section-gap" title="Data karyawan" caption="Registrasi administratif; tidak memakai biometrik" action={<Button disabled={!!engine.connectionError} onClick={()=>setModal({type:'employee'})}>Tambah karyawan</Button>}><DataTable testId="engine-employees" rows={engine.snapshot?.employees||[]} columns={[{key:'display_name',label:'Nama'},{key:'active',label:'Status',render:r=>r.active?'Aktif':'Nonaktif'},{key:'id',label:'ID'}]} empty={<Empty title="Belum ada karyawan terdaftar" description="Data karyawan digunakan untuk assignment administratif."/>}/></Panel><Panel className="section-gap" title="Assignment workstation" caption="Assignment tidak membuktikan identitas orang teramati" action={<Button disabled={!engine.snapshot?.employees.length||!engine.snapshot?.workspaces.length||!!engine.connectionError} onClick={()=>setModal({type:'assignment'})}>Tambah assignment</Button>}><DataTable testId="engine-assignments" rows={engine.snapshot?.assignments||[]} columns={[{key:'workspace_name',label:'Workstation'},{key:'display_name',label:'Karyawan'},{key:'effective_from_utc_us',label:'Mulai',render:r=>displayTime(r.effective_from_utc_us,engine.snapshot.timezone)},{key:'effective_to_utc_us',label:'Sampai',render:r=>displayTime(r.effective_to_utc_us,engine.snapshot.timezone)},{key:'source',label:'Sumber'}]}/></Panel></>;}
+function Workstations({engine,setModal,onSetup}) {
+  const hasZones=!!engine.snapshot?.workspaces.length,hasEmployees=!!engine.snapshot?.employees.length;
+  return <>
+    <section className="report-source" aria-label="Sumber konfigurasi workstation"><Field label="Sumber konfigurasi"><select value={engine.dataset} onChange={e=>engine.setDataset(e.target.value)}><option value="live">Kamera live</option><option value="replay">Replay simulasi</option></select></Field><p>{engine.dataset==='replay'?'Zona dan assignment berikut milik replay simulasi.':'Zona dan assignment untuk monitoring kamera live.'}</p></section>
+    <Panel title="Zona workstation" caption="Konfigurasi yang tersimpan di SQLite"><DataTable testId="engine-workspaces" rows={engine.snapshot?.workspaces||[]} columns={[{key:'name',label:'Workstation'},{key:'kind',label:'Jenis'},{key:'revision',label:'Revisi',numeric:true},{key:'exclusive_group',label:'Kelompok eksklusif'},{key:'polygon',label:'Zona',sortable:false,render:r=><Button onClick={()=>setModal({type:'zone',value:r})}>Lihat polygon</Button>}]} empty={<Empty title="Belum ada zona tersimpan" description="Atur batas workstation dari kamera yang akan dipantau." action={<Button onClick={onSetup}>Atur zona kamera</Button>}/>}/></Panel>
+    <Panel className="section-gap" title="Data karyawan" caption="Registrasi administratif; tidak memakai biometrik" action={<Button disabled={!!engine.connectionError} onClick={()=>setModal({type:'employee'})}>Tambah karyawan</Button>}><DataTable testId="engine-employees" rows={engine.snapshot?.employees||[]} columns={[{key:'display_name',label:'Nama'},{key:'active',label:'Status',render:r=>r.active?'Aktif':'Nonaktif'},{key:'id',label:'ID'}]} empty={<Empty title="Belum ada karyawan terdaftar" description="Tambahkan karyawan untuk membuat assignment administratif. Identitas orang teramati tetap anonim."/>}/></Panel>
+    <Panel className="section-gap" title="Assignment workstation" caption="Assignment tidak membuktikan identitas orang teramati" action={<Button disabled={!hasEmployees||!hasZones||!!engine.connectionError} onClick={()=>setModal({type:'assignment'})}>Tambah assignment</Button>}><DataTable testId="engine-assignments" rows={engine.snapshot?.assignments||[]} columns={[{key:'workspace_name',label:'Workstation'},{key:'display_name',label:'Karyawan'},{key:'effective_from_utc_us',label:'Mulai',render:r=>displayTime(r.effective_from_utc_us,engine.snapshot.timezone)},{key:'effective_to_utc_us',label:'Sampai',render:r=>displayTime(r.effective_to_utc_us,engine.snapshot.timezone)},{key:'source',label:'Sumber'}]} empty={<Empty title="Belum ada assignment workstation" description={!hasZones?'Simpan zona workstation dan tambahkan karyawan sebelum membuat assignment.':!hasEmployees?'Tambahkan karyawan sebelum membuat assignment ke workstation.':'Gunakan Tambah assignment untuk mengatur penempatan administratif karyawan.'}/>}/></Panel>
+  </>;
+}
 
-function EngineSettings({engine}){return <><RecordingSettings engine={engine}/><RecordingDestination engine={engine}/><MaintenancePanel engine={engine}/><Panel title="Status aplikasi" caption="Koneksi, penyimpanan dan waktu tampilan"><dl className="engine-facts"><dt>Layanan monitoring</dt><dd>{engine.connectionError?'Tidak terhubung':'Terhubung'}</dd><dt>Zona waktu lokasi</dt><dd>{engine.snapshot?.timezone}</dd><dt>Data observasi</dt><dd>Tersimpan secara lokal</dd><dt>Rekaman video</dt><dd>{recordingLabel(engine.recordings)}</dd><dt>Audio</dt><dd>Tidak direkam</dd><dt>Identitas orang</dt><dd>Anonim; pengenalan wajah tidak digunakan</dd><dt>Terakhir diperbarui</dt><dd>{engine.receivedAt?new Intl.DateTimeFormat('id-ID',{timeZone:engine.snapshot.timezone,timeStyle:'medium'}).format(engine.receivedAt):'Belum tersedia'}</dd></dl><div className="engine-replay-controls"><Button icon={RefreshCw} onClick={engine.reload}>Periksa koneksi</Button><Button icon={Download} disabled={engine.reportLoading||!engine.report?.workstations.length||!!engine.connectionError} onClick={engine.exportCsv}>Unduh laporan saat ini</Button></div></Panel><details className="operations-diagnostics"><summary>Diagnostik teknis</summary><Panel title="Runtime lokal" caption="Informasi dari layanan analisis"><dl className="engine-facts"><dt>Detektor aktif</dt><dd>{engine.snapshot?.detector?.model||'Belum tersedia'}</dd><dt>Perangkat inferensi</dt><dd>{engine.snapshot?.detector?.runtime?.device_name||engine.snapshot?.detector?.runtime?.provider||'Belum tersedia'}</dd><dt>Presisi</dt><dd>{engine.snapshot?.detector?.runtime?.precision||'Belum tersedia'}</dd><dt>Model siap</dt><dd>{engine.snapshot?.detector?.ready?'Siap':'Belum dikonfirmasi'}</dd><dt>Skema database</dt><dd>{engine.snapshot?.schema_version??'Belum tersedia'}</dd><dt>Catatan tersimpan</dt><dd>{engine.snapshot?.committed_event_seq??0}</dd><dt>API</dt><dd>Same-origin, loopback</dd><dt>Kalender kerja</dt><dd>Belum diterapkan; Laporan menyediakan filter tanggal dan jam shift</dd></dl></Panel></details></>;}
+function ReportSource({engine}) {
+  const running=['QUEUED','RUNNING'].includes(engine.snapshot?.controller?.status);
+  return <section className="report-source" aria-label="Sumber laporan"><Field label="Sumber data laporan"><select value={engine.dataset} onChange={e=>engine.setDataset(e.target.value)}><option value="live">Kamera live</option><option value="replay">Replay simulasi</option></select></Field>{engine.dataset==='live'&&<CameraReportSource engine={engine}/>}<p>{engine.dataset==='live'?'Data kamera live. Kehadiran di zona belum membuktikan hasil kerja.':'Data replay sintetis untuk menguji alur; bukan observasi kamera nyata.'}</p>{engine.dataset==='replay'&&<Button icon={Play} disabled={running||engine.mutating||!!engine.connectionError} onClick={()=>engine.action('replay').catch(()=>{})}>{running?'Replay berjalan':'Jalankan replay'}</Button>}</section>;
+}
+
+function CameraReportSource({engine}) {
+  return <Field label="Kamera laporan"><select value={engine.cameraId} onChange={e=>engine.setCameraId(e.target.value)}><option value="">Webcam / sesi RTSP utama</option>{engine.snapshot?.camera_catalog?.map(c=><option key={c.id} value={c.id}>{c.name}{c.archived?' (arsip)':''}</option>)}</select></Field>;
+}
+
+function EngineSettings({engine}) {
+  return <><RecordingSettings engine={engine}/><RecordingDestination engine={engine}/><MaintenancePanel engine={engine}/>
+    <Panel title="Status aplikasi" caption="Koneksi, penyimpanan dan waktu tampilan"><dl className="engine-facts">
+      <dt>Layanan monitoring</dt><dd>{engine.connectionError?'Tidak terhubung':'Terhubung'}</dd><dt>Zona waktu lokasi</dt><dd>{engine.snapshot?.timezone}</dd>
+      <dt>Data observasi</dt><dd>Tersimpan secara lokal</dd><dt>Rekaman video</dt><dd>{recordingLabel(engine.recordings)}</dd><dt>Audio</dt><dd>Tidak direkam</dd>
+      <dt>Identitas orang</dt><dd>Anonim; pengenalan wajah tidak digunakan</dd><dt>Terakhir diperbarui</dt><dd>{engine.receivedAt?new Intl.DateTimeFormat('id-ID',{timeZone:engine.snapshot.timezone,timeStyle:'medium'}).format(engine.receivedAt):'Belum tersedia'}</dd>
+    </dl><div className="engine-replay-controls"><Button icon={RefreshCw} onClick={engine.reload}>Periksa koneksi</Button><Button icon={Download} disabled={engine.reportLoading||!engine.report?.workstations.length||!!engine.connectionError} onClick={engine.exportCsv}>Unduh laporan saat ini</Button></div></Panel>
+    <details className="operations-diagnostics"><summary>Diagnostik teknis</summary><Panel title="Runtime lokal" caption="Informasi dari layanan analisis"><dl className="engine-facts">
+      <dt>Detektor aktif</dt><dd>{engine.snapshot?.detector?.model||'Belum tersedia'}</dd><dt>Perangkat inferensi</dt><dd>{engine.snapshot?.detector?.runtime?.device_name||engine.snapshot?.detector?.runtime?.provider||'Belum tersedia'}</dd>
+      <dt>Presisi</dt><dd>{engine.snapshot?.detector?.runtime?.precision||'Belum tersedia'}</dd><dt>Model siap</dt><dd>{engine.snapshot?.detector?.ready?'Siap':'Belum dikonfirmasi'}</dd>
+      <dt>Skema database</dt><dd>{engine.snapshot?.schema_version??'Belum tersedia'}</dd><dt>Catatan tersimpan</dt><dd>{engine.snapshot?.committed_event_seq??0}</dd><dt>API</dt><dd>Same-origin, loopback</dd><dt>Kalender kerja</dt><dd>Belum diterapkan; Laporan menyediakan filter tanggal dan jam shift</dd>
+    </dl></Panel></details></>;
+}
 
 function EngineModal({modal,onClose,engine}){
   const [name,setName]=useState(''),[assignment,setAssignment]=useState({employee_id:engine.snapshot?.employees[0]?.id||'',workspace_id:engine.snapshot?.workspaces[0]?.id||'',start:inputUtc(engine.report?.start_utc_us),end:inputUtc((engine.report?.start_utc_us||0)+8*3600*1e6)}),[error,setError]=useState('');
@@ -53,14 +107,22 @@ function EngineModal({modal,onClose,engine}){
 }
 
 export default function EngineApp(){
-  const baseEngine=useEngine(),recordings=useRecordings(),engine={...baseEngine,recordings},[page,setPage]=useState(pageFromHash),[modal,setModal]=useState(null),[cameraHealth,setCameraHealth]=useState([]),[setupOpen,setSetupOpen]=useState(false),[analyticsTab,setAnalyticsTab]=useState('summary');
+  const baseEngine=useEngine(),recordings=useRecordings(),engine={...baseEngine,recordings},[page,setPage]=useState(pageFromHash),[modal,setModal]=useState(null),[cameraHealth,setCameraHealth]=useState([]),[setupOpen,setSetupOpen]=useState(true),[analyticsTab,setAnalyticsTab]=useState(()=>readRoute(window.location.hash).tab);
+  const [selectedCamera,setSelectedCamera]=useState('webcam'),[addRequest,setAddRequest]=useState(0);
+  const synchronizedSession=useRef(null);
   const webcam=useWebcamPreview();
   const live=useLiveEngine(webcam,engine);
-  useEffect(()=>{const changed=()=>{if(/^#\/?cameras$/.test(window.location.hash))window.history.replaceState(window.history.state,'',`${window.location.pathname}${window.location.search}#/live`);setPage(pageFromHash());};changed();window.addEventListener('hashchange',changed);return()=>window.removeEventListener('hashchange',changed);},[]);
-  function navigate(value){setPage(value);window.location.hash=`/${value}`;}
-  useEffect(()=>{if(live.active&&!live.state?.preview_only)setSetupOpen(true);},[live.state?.session_id,live.active]);
-  const running=['QUEUED','RUNNING'].includes(engine.snapshot?.controller?.status),showFilters=['analytics','reports'].includes(page);
-  function openTimeline(id){engine.setFilters(p=>({...p,workspace:id}));setAnalyticsTab('timeline');navigate('analytics');}
+  const managedCamera=cameraHealth.find(c=>c.id===selectedCamera&&c.managed);
+  useEffect(()=>{const changed=()=>{const route=readRoute(window.location.hash);setPage(route.page);if(route.page==='analytics')setAnalyticsTab(route.tab);};changed();window.addEventListener('hashchange',changed);return()=>window.removeEventListener('hashchange',changed);},[]);
+  useEffect(()=>{
+    const active=cameraHealth.find(c=>live.state?.source==='WEBCAM_LIVE'?c.id==='webcam':c.id!=='engine-rtsp'&&c.camera_key===live.state?.camera_key);
+    if(live.active&&active&&synchronizedSession.current!==live.state?.session_id){setSelectedCamera(active.id);synchronizedSession.current=live.state.session_id;}
+  },[cameraHealth,live.active,live.state?.session_id]);
+  function navigate(value){const route=readRoute(routeHash(value));setPage(route.page);if(value==='reports')setAnalyticsTab('export');window.location.hash=routeHash(route.page,value==='reports'?'export':analyticsTab);}
+  function reportTab(value){setAnalyticsTab(value);window.location.hash=routeHash('analytics',value);}
+  useEffect(()=>{if(live.active&&!live.state?.preview_only)setSetupOpen(false);},[live.state?.session_id,live.active]);
+  const showFilters=page==='analytics';
+  function openTimeline(id){engine.setFilters(p=>({...p,workspace:id}));setPage('analytics');reportTab('timeline');}
   function openSetup(){setSetupOpen(true);navigate('live');requestAnimationFrame(()=>document.querySelector('.camera-session-controls')?.scrollIntoView({block:'start',behavior:'smooth'}));}
   return <div className={`app-shell engine-app ${page==='live'?'camera-monitoring-page':''}`}>
     <aside className="sidebar">
@@ -70,33 +132,29 @@ export default function EngineApp(){
       <div className="sidebar-note"><p>Observasi workstation.<br/>Identitas orang tetap anonim.</p><span>{recordingLabel(engine.recordings)}</span></div>
     </aside>
     <div className="main-shell">
-      <div className="prototype-banner engine-banner"><strong>{engine.dataset==='live'?'DATA LIVE':'REPLAY SIMULASI'}</strong><span>{engine.dataset==='live'?'Laporan kamera live dari tracking dan zona yang dikalibrasi.':'Laporan dari replay berlabel simulasi.'} Kehadiran di zona belum membuktikan hasil kerja.</span></div>
       <header className="page-header">
         <div><span className="eyebrow">CCTV WORKSPACE</span><h1>{sections.find(s=>s[0]===page)[1]}</h1><p>{reportDescriptions[page]}</p></div>
-        <div className="header-actions"><Button icon={RefreshCw} onClick={engine.reload}>Perbarui status</Button>{engine.dataset==='replay'?<Button icon={Play} variant="primary" disabled={running||engine.mutating||!!engine.connectionError} onClick={()=>{engine.action('replay').catch(()=>{});navigate('live');}}>Jalankan replay</Button>:<Button variant="primary" onClick={openSetup}>Setup monitoring</Button>}</div>
+        <div className="header-actions">{page==='overview'&&<Button onClick={openSetup}>Setup monitoring</Button>}</div>
       </header>
       {engine.connectionError && <div className="system-warning" role="alert">Layanan monitoring tidak terhubung: {engine.connectionError} Data terakhir tetap tersimpan. Periksa koneksi aplikasi lalu perbarui status. Preview webcam dapat tetap digunakan.</div>}
       {live.active && <div className="operations-monitoring-ribbon" role="status"><span>{monitoringText(live.state,live.error||(Date.now()-live.receivedAt>4000?'stale':''))} · {live.state.source==='WEBCAM_LIVE'?'Webcam lokal':'Kamera RTSP'}</span><Button onClick={()=>navigate('live')}>Buka kamera aktif</Button></div>}
-      <div className="simulation-toolbar"><span className="engine-connection" data-testid="engine-connection">API: {engine.connectionError?'terputus':engine.snapshot?'terhubung':'menghubungkan'}{page==='live'?' · Monitoring lokal':` · ${engine.snapshot?.runs.length||0} sesi tersimpan`}</span><Field label="Sumber data laporan"><select value={engine.dataset} onChange={event=>engine.setDataset(event.target.value)}><option value="replay">Replay simulasi</option><option value="live">Kamera live</option></select></Field>{engine.dataset==='live' && <Field label="Kamera laporan"><select value={engine.cameraId} onChange={e=>engine.setCameraId(e.target.value)}><option value="">Webcam / sesi RTSP utama</option>{engine.snapshot?.camera_catalog?.map(c=><option key={c.id} value={c.id}>{c.name}{c.archived?' (arsip)':''}</option>)}</select></Field>}<span>{engine.snapshot?.runs.length||0} sesi {engine.dataset==='live'?'kamera live':'simulasi'} tersimpan</span></div>
       <main id="main-content">
-        <CameraWorkspace onHealthChange={setCameraHealth} page={page} engine={engine} live={live} webcam={{...webcam,liveSession:live.webcamSession,engineStarting:live.webcamStarting,inferencePaused:live.active&&live.state?.source==='RTSP_LIVE',calibration:live.state?.calibrations?.WEBCAM_LIVE}}/>
-        <details className={`camera-session-controls live-engine-section ${page==='live'||live.active?'':'webcam-hidden'}`} open={setupOpen} onToggle={e=>setSetupOpen(e.currentTarget.open)}><summary>Setup dan monitoring <span>{monitoringText(live.state,live.error)}</span></summary><LiveEnginePanel onReports={()=>{engine.setDataset('live');navigate('reports');}} hidePreview={page==='live'} live={live} webcam={webcam} engine={engine}/></details>
+        <details className={`camera-session-controls live-engine-section ${page==='live'?'':'webcam-hidden'}`} open={setupOpen} onToggle={e=>setSetupOpen(e.currentTarget.open)}><summary>Setup dan monitoring <span>{managedCamera?managedCamera.name:monitoringText(live.state,live.error)}</span></summary>{managedCamera?<ManagedCameraControls key={managedCamera.id} camera={managedCamera} engine={engine}/>:<LiveEnginePanel cameras={cameraHealth} selected={selectedCamera} onSelect={setSelectedCamera} onAdd={()=>setAddRequest(v=>v+1)} onReports={()=>{engine.setDataset('live');engine.setCameraId('');navigate('reports');}} hidePreview live={live} webcam={webcam} engine={engine}/>}</details>
+        <CameraWorkspace selected={selectedCamera} onSelect={setSelectedCamera} onConfigure={camera=>{setSelectedCamera(camera.id);openSetup();}} addRequest={addRequest} onHealthChange={setCameraHealth} page={page} engine={engine} live={live} webcam={{...webcam,liveSession:live.webcamSession,engineStarting:live.webcamStarting,inferencePaused:live.active&&live.state?.source==='RTSP_LIVE',calibration:live.state?.calibrations?.WEBCAM_LIVE}}/>
         {engine.loading ? <Empty title="Menghubungkan layanan monitoring" description="Menunggu status kamera dan catatan tersimpan. Model dapat memerlukan waktu saat aplikasi baru dimulai."/>
           : !engine.snapshot ? <Empty title="Engine belum dapat dibaca" description="Refresh koneksi atau muat ulang halaman setelah engine berjalan." action={<Button onClick={engine.reload}>Coba lagi</Button>}/>
           : <>
-            {showFilters && <ReportFilters engine={engine}/>}
+            {showFilters && <><ReportSource engine={engine}/><ReportFilters engine={engine}/></>}
             {showFilters && engine.reportError ? <Empty title="Laporan gagal dibaca" description={engine.reportError} action={<Button onClick={engine.reload}>Muat ulang laporan</Button>}/>
               : <>
-                {page==='overview' && <OperationalOverview engine={engine} live={engine.cameraId ? {...live,state:engine.snapshot?.live,active:['STARTING','RUNNING'].includes(engine.snapshot?.live?.status),error:engine.connectionError,receivedAt:engine.receivedAt} : live} cameras={cameraHealth} navigate={navigate} onSetup={openSetup} onTimeline={openTimeline} setModal={setModal}/>}
-                {page==='live' && <Live engine={engine} setModal={setModal}/>}
-                {page==='workspaces' && <Workstations engine={engine} setModal={setModal}/>}
-                {page==='analytics' && <Analytics engine={engine} setModal={setModal} tab={analyticsTab} setTab={setAnalyticsTab}/>}
-                {page==='reports' && <OperationalReports engine={engine} onTimeline={openTimeline}/>}
-                {page==='settings' && <EngineSettings engine={engine}/>}
+                {page==='overview' && <OperationalOverview engine={engine} live={live} cameras={cameraHealth} navigate={navigate} onSetup={openSetup} onTimeline={openTimeline} setModal={setModal}/>}
+                {page==='workspaces' && <Workstations engine={engine} setModal={setModal} onSetup={openSetup}/>}
+                {page==='analytics' && <Analytics engine={engine} setModal={setModal} tab={analyticsTab} setTab={reportTab}/>}
+                {page==='settings' && <><EngineSettings engine={engine}/><details className="operations-diagnostics"><summary>Simulasi dan diagnostik observasi</summary><ReportSource engine={engine}/><Live engine={engine} setModal={setModal}/></details></>}
               </>}
           </>}
       </main>
-      <footer className="status-bar"><span>Layanan monitoring · {engine.connectionError?'koneksi terputus':'lokal'}</span><span>Identitas: anonim</span><span>{recordingLabel(engine.recordings)}</span><span>{engine.snapshot?.timezone||'Zona waktu lokasi'}</span></footer>
+      <footer className="status-bar"><span data-testid="engine-connection">Layanan monitoring · {engine.connectionError?'koneksi terputus':engine.snapshot?'terhubung':'menghubungkan'}</span><span>Identitas: anonim</span><span>{recordingLabel(engine.recordings)}</span><span>{engine.snapshot?.timezone||'Zona waktu lokasi'}</span></footer>
     </div>
     {modal && <EngineModal key={modal.type} modal={modal} onClose={()=>setModal(null)} engine={engine}/>}
     {engine.notice && <div className="notification" role="status">{engine.notice}</div>}

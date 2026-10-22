@@ -92,9 +92,11 @@ class Tracker:
         tracked = self.tracker.update_with_detections(inputs)
         result = list(detections)
         self.last_tracks = []
+        used = set()
         for box, confidence, identifier in zip(tracked.xyxy, tracked.confidence, tracked.tracker_id):
-            match = next((i for i, d in enumerate(result) if tuple(box) == tuple(np.asarray(d.box, dtype=np.float32))), None)
+            match = next((i for i, d in enumerate(result) if i not in used and tuple(box) == tuple(np.asarray(d.box, dtype=np.float32))), None)
             if match is not None:
+                used.add(match)
                 track_id = f"{generation}:{self.epoch}:{int(identifier)}"
                 result[match] = Detection(result[match].box, float(confidence), track_id)
                 self.last_tracks.append(track_id)

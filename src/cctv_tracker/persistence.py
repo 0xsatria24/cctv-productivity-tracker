@@ -57,7 +57,7 @@ class Database:
 
     def migrate(self):
         scripts = [files("cctv_tracker").joinpath("resources", name).read_text(encoding="utf-8")
-                   for name in ("001_initial.sql", "002_assignments.sql", "003_live.sql")]
+                   for name in ("001_initial.sql", "002_assignments.sql", "003_live.sql", "004_person_sessions.sql")]
         version = self.conn.execute("PRAGMA user_version").fetchone()[0]
         if version > len(scripts):
             raise ValueError("Database schema is newer than this application")
@@ -105,6 +105,7 @@ class Database:
                          (run_id, model_id, "0.2.0", json.dumps({"data_source": source, "identity_source": "anonymous",
                           "workspace_ids": [stable_id("workspace:" + settings.camera_id + ":" + z.id) for z in settings.zones],
                           'model_sha256': model_sha, 'calibration_revision': model_manifest.get('calibration_revision'),
+                          'session_rules': asdict(settings.sessions),
                           'inference_runtime': {k: model_manifest[k] for k in ('provider','runtime_version','requested_device','execution_devices','device_name','precision','performance_hint','threads') if k in model_manifest}}), start, None, None))
             # A stopped/crashed run cannot carry occupied evidence into this run.
             old = conn.execute("SELECT id, start_utc_us,evidence_until_utc_us FROM zone_intervals WHERE end_utc_us IS NULL").fetchall()
@@ -122,6 +123,7 @@ class Database:
                 conn.execute("UPDATE camera_generations SET ended_utc_us=? WHERE engine_run_id=? AND ended_utc_us IS NULL", (last,previous["id"]))
                 conn.execute("DELETE FROM track_visits WHERE generation_id IN (SELECT id FROM camera_generations WHERE engine_run_id=?) AND end_utc_us IS NULL AND start_utc_us=last_observed_utc_us", (previous["id"],))
                 conn.execute("UPDATE track_visits SET end_utc_us=last_observed_utc_us WHERE generation_id IN (SELECT id FROM camera_generations WHERE engine_run_id=?) AND end_utc_us IS NULL", (previous["id"],))
+                conn.execute("UPDATE person_sessions SET status='EXPIRED',track_id=NULL,track_lifecycle=NULL,reason='INTERRUPTED' WHERE engine_run_id=? AND status<>'EXPIRED'", (previous['id'],))
             desired = {stable_id('workspace:' + settings.camera_id + ':' + z.id) for z in settings.zones}
             for old_config in conn.execute("SELECT id,workspace_id FROM workspace_configurations WHERE camera_id=? AND effective_to_utc_us IS NULL", (camera_id,)).fetchall():
                 if old_config['workspace_id'] not in desired:
@@ -203,17 +205,34 @@ class RunWriter:
         self.seq = 0
         self.generation = None
 
-    def commit(self, accumulators, observed_at, event_type="CHECKPOINT", *, generation, frame_seq, monotonic_ns, visits, transitions=()):
+    def commit(self, accumulators, observed_at, event_type="CHECKPOINT", *, generation, frame_seq, monotonic_ns, visits, transitions=(), sessions=(), session_events=(), mapping_version=0, emit_session_events=False):
         next_seq = self.seq + 1
         with self.db.transaction() as conn:
             event_seq = conn.execute("INSERT INTO event_log(event_id,engine_run_id,producer_seq,event_type,observed_utc_us,recorded_utc_us,payload_version,payload_json) VALUES(?,?,?,?,?,?,?,?)",
                                      (str(uuid4()), self.run_id, next_seq, event_type, observed_at, now_us(), 1,
                                       json.dumps({"identity_source": "anonymous", "generation_id": generation, "frame_seq": frame_seq, "monotonic_ns": str(monotonic_ns),
+                                                  'mapping_version': mapping_version, 'sessions': sessions, 'session_events': session_events,
                                                   "zones": {k: [asdict(r) for r in v.snapshot()] for k, v in accumulators.items()}}))).lastrowid
             if generation != self.generation:
                 conn.execute("UPDATE camera_generations SET ended_utc_us=? WHERE engine_run_id=? AND ended_utc_us IS NULL", (observed_at, self.run_id))
                 conn.execute("INSERT INTO camera_generations VALUES(?,?,?,?,?,NULL)", (generation,self.run_id,self.camera_id,
                              conn.execute("SELECT COUNT(*)+1 FROM camera_generations WHERE engine_run_id=?", (self.run_id,)).fetchone()[0],observed_at))
+            # Clear affected bindings first so a legitimate two-way tracker-ID
+            # change cannot collide with another row halfway through the update.
+            conn.executemany('UPDATE person_sessions SET track_id=NULL,track_lifecycle=NULL WHERE session_id=?',
+                             [(s['session_id'],) for s in sessions])
+            for session in sessions:
+                values = (session['session_id'], self.run_id, self.camera_id, session['camera_id'], session['generation_id'],
+                          session['first_seen_utc_us'], session['last_seen_utc_us'], session['accumulated_duration_us'],
+                          session['status'], session['track_id'], session['track_lifecycle'], session['mapping_version'],
+                          session['reason'], session['merged_into'], json.dumps(session['matching']),
+                          json.dumps(session['zone_times']), event_seq)
+                conn.execute('INSERT INTO person_sessions VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) '
+                             'ON CONFLICT(session_id) DO UPDATE SET last_seen_utc_us=excluded.last_seen_utc_us,'
+                             'accumulated_duration_us=excluded.accumulated_duration_us,status=excluded.status,'
+                             'track_id=excluded.track_id,track_lifecycle=excluded.track_lifecycle,mapping_version=excluded.mapping_version,'
+                             'reason=excluded.reason,merged_into=excluded.merged_into,matching_json=excluded.matching_json,'
+                             'zone_times_json=excluded.zone_times_json,updated_event_seq=excluded.updated_event_seq', values)
             current_visits = {(track, self.configs[alias][0]) for track, alias in visits}
             active_visits = conn.execute("SELECT * FROM track_visits WHERE generation_id IN (SELECT id FROM camera_generations WHERE engine_run_id=?) AND end_utc_us IS NULL", (self.run_id,)).fetchall()
             for visit in active_visits:
@@ -244,7 +263,7 @@ class RunWriter:
             for workspace_id, _ in self.configs.values():
                 active_start = next(a.current.start for alias, a in accumulators.items() if self.configs[alias][0] == workspace_id)
                 conn.execute("DELETE FROM zone_intervals WHERE engine_run_id=? AND workspace_id=? AND start_utc_us= evidence_until_utc_us AND start_utc_us<>?", (self.run_id, workspace_id, active_start))
-            for transition in transitions:
+            for transition in (*transitions, *(session_events if emit_session_events else ())):
                 next_seq += 1
                 conn.execute("INSERT INTO event_log(event_id,engine_run_id,producer_seq,event_type,observed_utc_us,recorded_utc_us,payload_version,payload_json) VALUES(?,?,?,?,?,?,?,?)",
                     (str(uuid4()), self.run_id, next_seq, transition["type"], observed_at, now_us(), 1,
@@ -256,6 +275,7 @@ class RunWriter:
 
     def finish(self, at, reason):
         with self.db.transaction() as conn:
+            conn.execute("UPDATE person_sessions SET status='EXPIRED',track_id=NULL,track_lifecycle=NULL,reason=? WHERE engine_run_id=? AND status<>'EXPIRED'", (reason, self.run_id))
             conn.execute("UPDATE camera_generations SET ended_utc_us=? WHERE engine_run_id=? AND ended_utc_us IS NULL", (at,self.run_id))
             conn.execute("DELETE FROM track_visits WHERE generation_id IN (SELECT id FROM camera_generations WHERE engine_run_id=?) AND end_utc_us IS NULL AND start_utc_us=last_observed_utc_us", (self.run_id,))
             conn.execute("UPDATE track_visits SET end_utc_us=last_observed_utc_us WHERE generation_id IN (SELECT id FROM camera_generations WHERE engine_run_id=?) AND end_utc_us IS NULL", (self.run_id,))

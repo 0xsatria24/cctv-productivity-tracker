@@ -44,7 +44,7 @@ export function currentObservation(live, receivedAt, now = Date.now(), error = '
   const latest = live?.latest;
   const fresh = !error && receivedAt && now >= receivedAt && now - receivedAt < 4000 && live?.status === 'RUNNING' && live?.camera_health === 'ONLINE' && latest;
   const zones = fresh && !live.preview_only ? latest.zones || [] : [];
-  return { fresh: !!fresh, zones, count: fresh ? latest.count : null,
+  return { fresh: !!fresh, zones, count: fresh && !live.preview_only ? latest.count : null,
     occupied: zones.filter(z => z.state === 'OCCUPIED').length,
     empty: zones.filter(z => z.state === 'EMPTY').length,
     unknown: zones.filter(z => z.state === 'UNKNOWN').length };
@@ -53,7 +53,7 @@ export function monitoringText(live, error = '') {
   if (error) return 'Status belum tersedia';
   if (!live) return 'Memuat status monitoring';
   if (['IDLE', 'STOPPED'].includes(live.status)) return 'Monitoring belum aktif';
-  if (live.status === 'STARTING') return 'Menyiapkan analisis';
+  if (live.status === 'STARTING') return live.preview_only ? 'Menghubungkan preview' : 'Menyiapkan analisis';
   if (live.status === 'STOPPING') return 'Menyimpan dan menghentikan';
   if (live.status === 'FAILED') return 'Monitoring perlu diperiksa';
   if (live.camera_health !== 'ONLINE') return 'Menunggu koneksi kamera';
