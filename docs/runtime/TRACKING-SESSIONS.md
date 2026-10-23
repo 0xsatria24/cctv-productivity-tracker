@@ -127,3 +127,10 @@ Laporan mesin lengkap: `runtime/tracking-session-validation-final.json`. Histori
 Gerak/box hanya bukti kontinuitas lintasan. Pengganti yang menghasilkan pengamatan identik dengan orang sebelumnya masih tidak dapat dibedakan. Orang diam yang hilang, crossing total, keluar/masuk frame, perubahan arah ekstrem, jitter besar, atau reconnect dapat memecah sesi. Ini tradeoff yang disengaja untuk mengurangi penggabungan dua orang.
 
 Fixture berpakaian mirip direpresentasikan dengan informasi visual yang sama-sama tidak tersedia: tidak ada fitur pakaian atau embedding yang dipakai untuk menggabungkan. Hasil tersebut tidak mengukur diskriminasi pakaian dari rekaman nyata. Belum ada pengukuran akurasi lapangan, ReID, decoder multi-kamera, native memory/RSS, soak panjang, atau kapasitas produksi. Database menyimpan histori audit; batas state di RAM tidak menggantikan kebijakan retensi disk.
+
+## Pembaruan adapter MOT
+
+Perbaikan cadence Kalman/ByteTrack, binding source index, konfigurasi raw tracker,
+dan pencegahan sesi dari deteksi lemah dijelaskan di
+[MULTI-OBJECT-TRACKING.md](MULTI-OBJECT-TRACKING.md). Aturan konservatif sesi dan
+timer di dokumen ini tetap menjadi batas recovery aplikasi.

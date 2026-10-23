@@ -101,7 +101,7 @@ def test_multi_camera_uses_real_shared_accounting_with_synthetic_capture(tmp_pat
             return {'jpeg': b'synthetic', 'monotonic_ns': time.perf_counter_ns(), 'generation': 'fixture'}
         def close(self):
             pass
-    monkeypatch.setattr(module, 'create_detector', lambda *args: FixtureDetector())
+    monkeypatch.setattr(module, 'create_detector', lambda *args, **kwargs: FixtureDetector())
     monkeypatch.setattr(module, 'create_live_engine', lambda settings, detector: LiveController(settings, detector, capture_factory=Capture))
     service = EngineService(Settings(database=tmp_path / 'headless.sqlite3'), entitlement())
     with TestClient(create_app(service, TOKEN)) as client:

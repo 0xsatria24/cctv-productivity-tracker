@@ -28,7 +28,8 @@ class AccountingFailure(RuntimeError):
 
 
 def validate_calibration(value):
-    if set(value) != {'width', 'height', 'zones', 'rules', 'camera_key'}:
+    required = {'width', 'height', 'zones', 'rules', 'camera_key'}
+    if not required <= set(value) or set(value) - required - {'position'}:
         raise ValueError('Konfigurasi kalibrasi tidak lengkap')
     width, height = value['width'], value['height']
     if not isinstance(value['camera_key'], str) or len(value['camera_key']) != 64 or any(c not in '0123456789abcdef' for c in value['camera_key']):
@@ -41,6 +42,8 @@ def validate_calibration(value):
     if len({z.id for z in zones}) != len(zones) or any(len(z.id) > 40 or len(z.name) > 80 or not z.name.strip() or not z.exclusive_group.strip() or len(z.exclusive_group) > 40 for z in zones):
         raise ValueError('ID zona harus unik; nama maksimal 80 karakter')
     rules = Rules(**value['rules'])
+    from .positioning import position_calibration
+    position_calibration(value.get('position')).validate_zones(zones)
     if not 0.1 <= rules.occupied_confirm_seconds <= 60 or not 0.1 <= rules.empty_confirm_seconds <= 120 or not 0.5 <= rules.max_evidence_gap_seconds <= 10:
         raise ValueError('Batas konfirmasi/gap di luar rentang live yang didukung')
     return zones, rules
@@ -68,6 +71,9 @@ class LiveController:
         with self.lock:
             value = copy.deepcopy(self.state)
             value['calibrations'] = copy.deepcopy(self.profiles)
+        scheduling = getattr(self.detector, 'scheduling_snapshot', None)
+        if scheduling:
+            value['scheduler'] = scheduling()
         latest = value.get('latest')
         if latest and (time.perf_counter_ns() - latest['processed_monotonic_ns']) / 1e9 > 3:
             value['latest'] = None
@@ -111,7 +117,9 @@ class LiveController:
                 raise ValueError('Kamera berbeda dari kalibrasi tersimpan. Kalibrasikan kamera ini terlebih dahulu')
             zones, rules = validate_calibration({k: v for k, v in profile.items() if k != 'revision'}) if profile else ((), Rules(max_evidence_gap_seconds=3))
             camera_id = self.settings.camera_id if self.settings.camera_id != 'camera-1' else source.lower() + '-primary'
+            from .positioning import position_calibration
             config = replace(self.settings, camera_id=camera_id, zones=zones, rules=rules,
+                             position=position_calibration(profile.get('position') if profile else None),
                              inference_fps=5, frame_stale_seconds=rules.max_evidence_gap_seconds)
             session = str(uuid4())
             self.stop_event.clear()
@@ -189,14 +197,14 @@ class LiveController:
                 pipeline = Pipeline(config, db, anchor_utc, source, getattr(self.detector, 'sha', MODEL_SHA256), {**getattr(self.detector, 'manifest', MODEL_MANIFEST), 'calibration_revision': profile['revision'], 'calibration_width': profile['width'], 'calibration_height': profile['height']}, live_events=True)
             self._update(status='RUNNING', run_id=pipeline.writer.run_id if pipeline else None)
 
-            def account(detections, mono, unavailable=None):
+            def account(detections, mono, unavailable=None, *, frame_jpeg=None):
                 nonlocal seq, last_mono
                 if mono <= last_mono:
                     raise ValueError('Frame terlalu lama; tidak menjadi bukti pencatatan')
                 seq += 1
                 # Anchor UTC once; elapsed durations follow the server monotonic clock.
                 try:
-                    result = pipeline.feed(detections, anchor_utc + (mono - anchor_mono) // 1000, mono, seq, generation, unavailable) if pipeline else {}
+                    result = pipeline.feed(detections, anchor_utc + (mono - anchor_mono) // 1000, mono, seq, generation, unavailable, frame_jpeg=frame_jpeg) if pipeline else {}
                 except Exception as error:
                     raise AccountingFailure('Accounting stopped at committed checkpoint') from error
                 last_mono = mono
@@ -230,14 +238,21 @@ class LiveController:
                         mono = item['monotonic_ns']
                         if mono <= last_mono or time.perf_counter_ns() - mono > config.frame_stale_seconds * 1e9:
                             raise ValueError('Frame stale; kirim frame terbaru')
-                        result = self.detector.detect(item['jpeg'])
+                        detect_latest = getattr(self.detector, 'detect_latest', None)
+                        if detect_latest:
+                            result, item = detect_latest(item, (lambda: capture.read(timeout=0)) if capture else None,
+                                                       config.frame_stale_seconds, stop_event=self.stop_event,
+                                                       minimum_monotonic_ns=last_mono)
+                            generation, mono = item['generation'], item['monotonic_ns']
+                        else:
+                            result = self.detector.detect(item['jpeg'])
                         if not preview_only and abs(result['width'] / result['height'] - profile['width'] / profile['height']) > 0.02:
                             raise ValueError('Rasio frame berubah. Hentikan sesi dan kalibrasikan ulang zona')
                         if time.perf_counter_ns() - mono > config.frame_stale_seconds * 1e9:
                             raise ValueError('Inferensi terlalu lambat; hasil tidak menjadi bukti')
                         if self.stop_event.is_set():
                             raise ValueError('Sesi telah berhenti; hasil inferensi diabaikan')
-                        accounting = account([Detection(tuple(d['box']), d['confidence']) for d in result['detections']], mono)
+                        accounting = account([Detection(tuple(d['box']), d['confidence']) for d in result['detections']], mono, frame_jpeg=item['jpeg'])
                         last_valid = mono / 1e9; attempts = 0
                         result.update(accounting)
                         result.update(source=source, recorded=not preview_only, processed_monotonic_ns=time.perf_counter_ns())

@@ -7,6 +7,7 @@ from threading import RLock
 from cctv_tracker.engine import create_detector, create_live_engine
 from cctv_tracker.persistence import Database
 from cctv_tracker.rtsp import validate_rtsp_url, rtsp_camera_key
+from cctv_tracker.inference import InferenceScheduler
 
 
 class EngineService:
@@ -15,9 +16,13 @@ class EngineService:
         self.detector_options = (detector, device, model_path)
         self.cameras = {}
         self.lock = RLock()
+        self.scheduler = None
+        self.closed = False
 
     def add(self, camera_id, url):
         with self.lock:
+            if self.closed:
+                raise ValueError('Engine service is closed')
             self.license.check()
             if camera_id in self.cameras:
                 raise ValueError('Camera already registered')
@@ -25,7 +30,10 @@ class EngineService:
                 raise ValueError('Licensed camera limit reached')
             url = validate_rtsp_url(url)
             settings = replace(self.settings, camera_id=camera_id, database=self.settings.database.parent / (sha256(camera_id.encode()).hexdigest() + '.sqlite3'))
-            engine = create_live_engine(settings, create_detector(*self.detector_options))
+            if self.scheduler is None:
+                self.scheduler = InferenceScheduler(create_detector(*self.detector_options, tuning=settings.detection), settings.scheduling)
+            lane = self.scheduler.bind('camera:' + camera_id, max_fps=settings.inference_fps)
+            engine = create_live_engine(settings, lane)
             self.cameras[camera_id] = (url, engine)
             return self.status(camera_id)
 
@@ -45,6 +53,8 @@ class EngineService:
 
     def start(self, camera_id, preview_only=False):
         with self.lock:
+            if self.closed:
+                raise ValueError('Engine service is closed')
             self.license.check()
             engine = self.get(camera_id)
             return engine.start('RTSP_LIVE', self.cameras[camera_id][0], preview_only=preview_only)
@@ -55,6 +65,7 @@ class EngineService:
             engine.shutdown()
             if engine.thread and engine.thread.is_alive():
                 raise ValueError('Camera is still stopping; retry later')
+            engine.detector.close()
             del self.cameras[camera_id]
 
     def events(self, camera_id, after=0, limit=100):
@@ -64,5 +75,14 @@ class EngineService:
 
     def shutdown(self):
         with self.lock:
+            self.closed = True
+            if self.scheduler:
+                self.scheduler.close(timeout=0)
             for _, engine in self.cameras.values():
                 engine.shutdown()
+            if self.scheduler:
+                self.scheduler.close()
+
+    def scheduling_snapshot(self):
+        with self.lock:
+            return self.scheduler.snapshot() if self.scheduler else {'policy': 'fifo-per-source', 'pending': 0, 'active_source': None, 'streams': {}}

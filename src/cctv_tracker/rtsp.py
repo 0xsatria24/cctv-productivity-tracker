@@ -2,6 +2,7 @@
 import multiprocessing as mp
 from queue import Empty, Full
 import time
+import math
 from urllib.parse import urlsplit
 from uuid import uuid4
 from hashlib import sha256
@@ -38,6 +39,11 @@ def _latest(mailbox, item):
             pass
 
 
+def capture_dimensions(width, height):
+    scale = min(1, 1280 / max(width, height), math.sqrt((1280 * 720) / (width * height)))
+    return max(1, int(width * scale)), max(1, int(height * scale))
+
+
 def capture_worker(url, mailbox, stop, open_timeout, read_timeout):
     import av
     import cv2
@@ -65,10 +71,9 @@ def capture_worker(url, mailbox, stop, open_timeout, read_timeout):
                 sampled = captured / 1e9
                 if frame.width * frame.height > 4096 * 2160:
                     raise ValueError('Unsupported frame size')
-                width = max(1, round(frame.width * min(1, 640 / max(frame.width, frame.height))))
-                height = max(1, round(frame.height * min(1, 640 / max(frame.width, frame.height))))
+                width, height = capture_dimensions(frame.width, frame.height)
                 image = frame.reformat(width=width, height=height, format='bgr24').to_ndarray()
-                success, encoded = cv2.imencode('.jpg', image, [cv2.IMWRITE_JPEG_QUALITY, 75])
+                success, encoded = cv2.imencode('.jpg', image, [cv2.IMWRITE_JPEG_QUALITY, 90])
                 if success:
                     _latest(mailbox, {'jpeg': encoded.tobytes(), 'monotonic_ns': captured, 'generation': generation})
     except Exception:

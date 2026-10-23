@@ -50,6 +50,16 @@ class LiveRulesInput(BaseModel):
     strong_confidence: float = Field(default=0.5, gt=0, le=1)
 
 
+class PositionInput(BaseModel):
+    model_config = ConfigDict(extra='forbid', allow_inf_nan=False)
+    mode: Literal['bbox_overlap', 'footpoint', 'homography'] = 'bbox_overlap'
+    image_points: list[tuple[float, float]] = Field(default_factory=list, max_length=4)
+    floor_width_m: float | None = Field(default=None, ge=0.1, le=1000)
+    floor_depth_m: float | None = Field(default=None, ge=0.1, le=1000)
+    image_boundary_margin: float = Field(default=0.01, gt=0, le=0.1)
+    floor_boundary_margin_m: float = Field(default=0.1, gt=0, le=5)
+
+
 class CalibrationInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     source: Literal['WEBCAM_LIVE', 'RTSP_LIVE']
@@ -58,6 +68,7 @@ class CalibrationInput(BaseModel):
     zones: list[LiveZoneInput] = Field(min_length=1, max_length=16)
     rules: LiveRulesInput
     camera_key: str = Field(min_length=64, max_length=64)
+    position: PositionInput | None = None
 
 
 class LiveStartInput(BaseModel):
@@ -96,21 +107,33 @@ def create_app(database: Path, token: str, *, controller=None, ui_dir: Path | No
             import cv2
             import numpy as np
             await run_in_threadpool(webcam_detector.detect, cv2.imencode('.jpg', np.zeros((64, 64, 3), dtype=np.uint8))[1].tobytes())
-        yield
-        if camera_wall:
-            camera_wall.shutdown()
-        if live:
-            live.shutdown()
-        if controller:
-            controller.shutdown()
+        try:
+            yield
+        finally:
+            scheduler.close(timeout=0)
+            if camera_wall:
+                camera_wall.shutdown()
+            if live:
+                live.shutdown()
+            if controller:
+                controller.shutdown()
+            scheduler.close()
 
     app = FastAPI(title="CCTV local pilot API", version="0.2.0", docs_url=None, redoc_url=None, lifespan=lifespan)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", *([] if ui_dir else ["testserver"])])
     bearer = HTTPBearer(auto_error=False)
     from .webcam import jpeg_dimensions
     from .engine import create_detector, create_live_engine
-    webcam_detector = create_detector(detector_kind, openvino_device)
-    live = create_live_engine(controller.settings, webcam_detector) if controller and hasattr(controller, 'settings') else None
+    tuning = controller.settings.detection if controller and hasattr(controller, 'settings') else None
+    webcam_detector = create_detector(detector_kind, openvino_device, tuning=tuning)
+    from .inference import InferenceScheduler
+    scheduler = InferenceScheduler(webcam_detector, controller.settings.scheduling if controller and hasattr(controller, 'settings') else None)
+    preview_detector = scheduler.bind('webcam-preview', max_fps=5)
+    legacy_replay_detector = scheduler.bind('replay:stateless', max_fps=5)
+    app.state.inference_scheduler = scheduler
+    from .replay_tracking import ReplayConflict, ReplayFrame, ReplayTracking
+    replay_tracking = ReplayTracking(controller.settings if controller and hasattr(controller, 'settings') else None)
+    live = create_live_engine(controller.settings, scheduler.bind('live:' + controller.settings.camera_id, max_fps=controller.settings.inference_fps)) if controller and hasattr(controller, 'settings') else None
     from .camera_wall import CameraWall
     camera_wall = CameraWall(controller.settings) if live else None
 
@@ -147,11 +170,21 @@ def create_app(database: Path, token: str, *, controller=None, ui_dir: Path | No
             result = snapshot(db, controller, timezone)
             result.update(dataset=dataset, live=live.snapshot() if live else None, live_capture_available=bool(live))
             result['detector'] = {'model': webcam_detector.runtime_label, 'ready': webcam_detector.session is not None, 'runtime': dict(webcam_detector.manifest)}
+            result['scheduler'] = scheduler.snapshot()
             if dataset == 'live':
                 result['mode'] = 'integrated_live_pilot'
             return result
 
+    @app.get('/pilot/v1/replay/status', dependencies=[Depends(authenticate)])
+    def replay_status():
+        return {'available': controller is not None, 'source': 'LOCAL_VIDEO_REPLAY',
+                'recorded': False, 'tracking_supported': True, 'duration_accounting': False,
+                'reid': {'mode': replay_tracking.settings.reid.mode,
+                         'configured': replay_tracking.settings.reid.mode != 'off',
+                         'recovery_policy': replay_tracking.settings.reid.recovery_policy}}
+
     @app.post("/pilot/v1/webcam/frame", dependencies=[Depends(authenticate)])
+    @app.post("/pilot/v1/replay/frame", dependencies=[Depends(authenticate)])
     async def webcam_frame(request: Request):
         if not controller:
             raise HTTPException(status_code=409, detail="Jalankan dashboard untuk memakai engine webcam")
@@ -164,6 +197,14 @@ def create_app(database: Path, token: str, *, controller=None, ui_dir: Path | No
             body.extend(chunk)
         try:
             jpeg_dimensions(body)
+            if request.url.path == '/pilot/v1/replay/frame':
+                frame = ReplayFrame.from_headers(request.headers)
+                if frame:
+                    lane = scheduler.bind('replay:' + frame.replay_id, max_fps=5)
+                    return await run_in_threadpool(replay_tracking.process, lane, bytes(body), frame)
+                result = await run_in_threadpool(legacy_replay_detector.detect, bytes(body))
+                return {**result, 'source': 'LOCAL_VIDEO_REPLAY', 'recorded': False,
+                        'tracking_supported': False, 'duration_accounting': False}
             session = request.headers.get('x-live-session')
             if session:
                 if not live:
@@ -174,7 +215,9 @@ def create_app(database: Path, token: str, *, controller=None, ui_dir: Path | No
                 return await run_in_threadpool(live.submit, bytes(body), session, int(sequence))
             if live and live.snapshot()['status'] in {'STARTING', 'RUNNING', 'STOPPING'}:
                 raise HTTPException(status_code=409, detail='Sesi live sedang memakai engine. Hentikan sesi tersebut atau kirim frame dengan session ID yang aktif.')
-            return await run_in_threadpool(webcam_detector.detect, bytes(body))
+            return await run_in_threadpool(preview_detector.detect, bytes(body))
+        except ReplayConflict as error:
+            raise HTTPException(status_code=409, detail=str(error)) from None
         except BlockingIOError as error:
             raise HTTPException(status_code=429, detail=str(error)) from None
         except ValueError as error:
@@ -198,8 +241,10 @@ def create_app(database: Path, token: str, *, controller=None, ui_dir: Path | No
             value = values.model_dump()
             source = value.pop('source')
             return live.save_calibration(source, value)
-        except (ValueError, TypeError, KeyError):
-            raise HTTPException(status_code=422, detail='Kalibrasi tidak valid atau sesi masih aktif. Gunakan polygon sederhana, ID unik, dan aturan dalam batas yang didukung.') from None
+        except ValueError as failure:
+            raise HTTPException(status_code=422, detail=str(failure)) from None
+        except (TypeError, KeyError):
+            raise HTTPException(status_code=422, detail='Kalibrasi tidak valid. Periksa polygon, empat sudut lantai, ukuran nyata, dan aturan.') from None
 
     @app.post('/pilot/v1/live/start', status_code=202, dependencies=[Depends(authenticate)])
     def live_start(values: LiveStartInput):

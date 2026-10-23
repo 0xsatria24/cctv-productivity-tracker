@@ -57,7 +57,7 @@ class Database:
 
     def migrate(self):
         scripts = [files("cctv_tracker").joinpath("resources", name).read_text(encoding="utf-8")
-                   for name in ("001_initial.sql", "002_assignments.sql", "003_live.sql", "004_person_sessions.sql")]
+                   for name in ("001_initial.sql", "002_assignments.sql", "003_live.sql", "004_person_sessions.sql", "005_reid_decisions.sql")]
         version = self.conn.execute("PRAGMA user_version").fetchone()[0]
         if version > len(scripts):
             raise ValueError("Database schema is newer than this application")
@@ -89,7 +89,10 @@ class Database:
     def begin_run(self, settings, *, source, model_sha, model_manifest, start):
         site_id = stable_id("site:" + settings.site_name)
         camera_id = stable_id("camera:" + settings.camera_id)
-        rule_json = json.dumps(asdict(settings.rules), sort_keys=True)
+        rule_values = asdict(settings.rules)
+        if settings.position.mode != 'bbox_overlap':
+            rule_values['position_calibration'] = asdict(settings.position)
+        rule_json = json.dumps(rule_values, sort_keys=True)
         rule_id = stable_id("rules:" + rule_json)
         model_id = stable_id("model:" + model_sha)
         run_id = str(uuid4())
@@ -106,6 +109,11 @@ class Database:
                           "workspace_ids": [stable_id("workspace:" + settings.camera_id + ":" + z.id) for z in settings.zones],
                           'model_sha256': model_sha, 'calibration_revision': model_manifest.get('calibration_revision'),
                           'session_rules': asdict(settings.sessions),
+                          'detection_policy': asdict(settings.detection),
+                          'tracking_policy': asdict(settings.tracking),
+                          'position_calibration': asdict(settings.position),
+                          'scheduling_policy': asdict(settings.scheduling),
+                          'reid_policy': asdict(settings.reid),
                           'inference_runtime': {k: model_manifest[k] for k in ('provider','runtime_version','requested_device','execution_devices','device_name','precision','performance_hint','threads') if k in model_manifest}}), start, None, None))
             # A stopped/crashed run cannot carry occupied evidence into this run.
             old = conn.execute("SELECT id, start_utc_us,evidence_until_utc_us FROM zone_intervals WHERE end_utc_us IS NULL").fetchall()
@@ -205,7 +213,7 @@ class RunWriter:
         self.seq = 0
         self.generation = None
 
-    def commit(self, accumulators, observed_at, event_type="CHECKPOINT", *, generation, frame_seq, monotonic_ns, visits, transitions=(), sessions=(), session_events=(), mapping_version=0, emit_session_events=False):
+    def commit(self, accumulators, observed_at, event_type="CHECKPOINT", *, generation, frame_seq, monotonic_ns, visits, transitions=(), sessions=(), session_events=(), mapping_version=0, emit_session_events=False, reid_decisions=(), reid_model=None):
         next_seq = self.seq + 1
         with self.db.transaction() as conn:
             event_seq = conn.execute("INSERT INTO event_log(event_id,engine_run_id,producer_seq,event_type,observed_utc_us,recorded_utc_us,payload_version,payload_json) VALUES(?,?,?,?,?,?,?,?)",
@@ -233,6 +241,12 @@ class RunWriter:
                              'track_id=excluded.track_id,track_lifecycle=excluded.track_lifecycle,mapping_version=excluded.mapping_version,'
                              'reason=excluded.reason,merged_into=excluded.merged_into,matching_json=excluded.matching_json,'
                              'zone_times_json=excluded.zone_times_json,updated_event_seq=excluded.updated_event_seq', values)
+            for decision in reid_decisions:
+                conn.execute('INSERT INTO reid_decisions VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                             (str(uuid4()), self.run_id, self.camera_id, generation, frame_seq, str(monotonic_ns),
+                              decision['token']['mapping_version'], mapping_version, decision['candidate_session_id'],
+                              decision['target_session_id'], decision['action'], decision['reason'], decision['score'],
+                              decision['margin'], json.dumps(reid_model or {}), decision['policy_revision'], event_seq))
             current_visits = {(track, self.configs[alias][0]) for track, alias in visits}
             active_visits = conn.execute("SELECT * FROM track_visits WHERE generation_id IN (SELECT id FROM camera_generations WHERE engine_run_id=?) AND end_utc_us IS NULL", (self.run_id,)).fetchall()
             for visit in active_visits:

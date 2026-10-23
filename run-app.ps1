@@ -6,7 +6,11 @@ param(
     [ValidateSet('nanodet','yolox','yolox-openvino')]
     [string]$Detector = 'yolox-openvino',
     [ValidateSet('CPU','GPU')]
-    [string]$OpenVinoDevice = 'GPU'
+    [string]$OpenVinoDevice = 'GPU',
+    [ValidateSet('balanced','detail')]
+    [string]$DetectionProfile = 'balanced',
+    [ValidateRange(0.01, 0.99)]
+    [double]$DetectionConfidence = 0.45
 )
 $ErrorActionPreference = 'Stop'
 $workspacePath = $PSScriptRoot
@@ -28,5 +32,5 @@ if (-not $SkipBuild) {
 }
 Set-Location -LiteralPath $workspacePath
 $env:MPLCONFIGDIR = Join-Path (Split-Path -Parent $DatabasePath) 'matplotlib'
-& $pythonExecutable -m cctv_tracker --database $DatabasePath dashboard --port $Port --detector $Detector --openvino-device $OpenVinoDevice
+& $pythonExecutable -m cctv_tracker --database $DatabasePath dashboard --port $Port --detector $Detector --openvino-device $OpenVinoDevice --detection-profile $DetectionProfile --detection-confidence ($DetectionConfidence.ToString([System.Globalization.CultureInfo]::InvariantCulture))
 exit $LASTEXITCODE

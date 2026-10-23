@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from collections import deque
 from pathlib import Path
 import hashlib
@@ -10,14 +10,19 @@ from .vision import Detection, Tracker, associate
 from .lease import EngineLease
 from .persistence import stable_id
 from .sessions import SessionManager
+from .positioning import measured_position
+from .reid.runtime import ReIdRuntime
+from .reid.types import FrameToken
 
 
 class Pipeline:
-    def __init__(self, settings, database, start, source, model_sha, model_manifest, *, live_events=False):
+    def __init__(self, settings, database, start, source, model_sha, model_manifest, *, live_events=False, reid_extractor=None):
+        if settings.reid.mode == 'active' and settings.sessions.count_lost_gap:
+            raise ValueError('Accounting ReID requires count_lost_gap=false')
         if not settings.zones:
             raise ValueError("At least one calibrated zone is required")
         self.settings, self.database, self.start, self.last_utc = settings, database, start, start
-        self.tracker = Tracker(settings.inference_fps, settings.rules.max_evidence_gap_seconds)
+        self.tracker = Tracker(settings.inference_fps, settings.rules.max_evidence_gap_seconds, rules=settings.tracking)
         self.accumulators = {z.id: ZoneAccumulator(start, settings.rules) for z in settings.zones}
         self.lease = EngineLease(database.path)
         try:
@@ -34,8 +39,9 @@ class Pipeline:
         self.clock_anchor = None
         self.latest = None
         self.retired_generations = deque(maxlen=16)
+        self.reid = ReIdRuntime(replace(settings.reid, recovery_policy='motion'), reid_extractor)
 
-    def feed(self, detections, utc_us, monotonic_ns, seq, generation, unavailable=None, *, mapping_version=None):
+    def feed(self, detections, utc_us, monotonic_ns, seq, generation, unavailable=None, *, mapping_version=None, frame_jpeg=None):
         # Reject before ANY tracker/session/zone mutation. A result from a retired
         # frame cannot rebind a session or advance the durable checkpoint.
         if (generation in self.retired_generations or
@@ -58,8 +64,13 @@ class Pipeline:
             mapped = {z.id: (State.UNKNOWN, None, unavailable) for z in self.settings.zones}
         else:
             tracked = self.tracker.update(detections, monotonic_ns / 1e9, scoped_generation)
-            mapped = associate(tracked, self.settings.zones, self.settings.rules)
-        bindings = self.sessions.update(tracked, utc_us, monotonic_ns, scoped_generation, unavailable)
+            mapped = associate(tracked, self.settings.zones, self.settings.rules, self.settings.position)
+        bindings = self.sessions.update(tracked, utc_us, monotonic_ns, scoped_generation, unavailable,
+                                        recover=self.settings.reid.mode != 'active')
+        token = FrameToken(self.settings.camera_id, self.writer.run_id, scoped_generation,
+                           seq, monotonic_ns, self.sessions.mapping_version)
+        reid_stage = self.reid.prepare(frame_jpeg, tracked, token, self.sessions, bindings, unavailable)
+        bindings = self.reid.apply(reid_stage, self.sessions, bindings)
         for detection, session in bindings:
             if session is not None:
                 visits.extend((session.track_lifecycle, alias) for alias, zone in session.zones.items() if zone.observed_inside)
@@ -85,12 +96,16 @@ class Pipeline:
             self.writer.commit(self.accumulators, utc_us, generation=scoped_generation, frame_seq=seq, monotonic_ns=monotonic_ns,
                                visits=visits, transitions=transitions, sessions=session_rows,
                                session_events=self.sessions.events, mapping_version=self.sessions.mapping_version,
-                               emit_session_events=self.live_events)
+                               emit_session_events=self.live_events,
+                               reid_decisions=[d for d in reid_stage['report']['decisions'] if d['reason'] != 'NO_ELIGIBLE_GALLERY']
+                                              if self.settings.reid.mode == 'active' else (),
+                               reid_model=reid_stage['report'].get('model'))
         except Exception:
             # The owning command aborts; uncommitted memory is never retried as evidence.
             logging.getLogger("cctv_tracker").error("PERSISTENCE_GAP: accounting stopped")
             raise
         self.last_utc = utc_us
+        reid_report = self.reid.commit(reid_stage, set(self.sessions.sessions))
         if self.last_generation is not None and self.last_generation != generation:
             self.retired_generations.append(self.last_generation)
         self.last_monotonic_ns, self.last_sequence, self.last_generation = monotonic_ns, seq, generation
@@ -99,7 +114,9 @@ class Pipeline:
         rows = []
         for detection, session in bindings:
             snapshot = session_snapshots[session.session_id] if session else None
-            rows.append({**dataclass_detection(detection), 'track_id': session.track_id if session else None,
+            rows.append({**dataclass_detection(detection),
+                         'position': measured_position(detection, self.settings.position) if self.settings.position.mode != 'bbox_overlap' else None,
+                         'track_id': session.track_id if session else None,
                          'session_id': session.session_id if session else None,
                          'track_lifecycle': session.track_lifecycle if session else None,
                          'mapping_version': self.sessions.mapping_version,
@@ -115,6 +132,9 @@ class Pipeline:
                 'frame_monotonic_ns': str(monotonic_ns), 'captured_utc_us': captured_utc_us,
                 'sessions': [session_snapshots.get(s.session_id) or self.sessions.snapshot(s) for s in self.sessions.sessions.values()],
                 'session_metrics': dict(self.sessions.metrics),
+                'reid': reid_report,
+                'tracking': {'algorithm': 'ByteTrack', 'available': False, 'reason': unavailable}
+                            if unavailable else dict(getattr(self.tracker, 'metrics', {})),
                 "detections": rows,
                 "zones": [{"id": alias, "name": next(z.name for z in self.settings.zones if z.id == alias),
                            "state": a.current.state, "count": a.current.count, "reason": a.current.reason,
@@ -129,6 +149,7 @@ class Pipeline:
             return self.database.report(self.start, max(self.last_utc, self.start + 1), run_id=self.writer.run_id)
         finally:
             self.sessions.finish()
+            self.reid.clear()
             self.lease.close()
 
 

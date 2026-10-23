@@ -1,5 +1,6 @@
 """Native adapters are optional; no model download or biometric matching."""
 from dataclasses import dataclass
+from collections import Counter
 from pathlib import Path
 import hashlib
 import json
@@ -7,6 +8,7 @@ import math
 
 from .domain.geometry import overlap_ratio
 from .domain.occupancy import State
+from .tracking import TrackingRules
 
 
 @dataclass(frozen=True)
@@ -27,49 +29,99 @@ class Detection:
 class Tracker:
     """ByteTrack frame aging is stepped by elapsed time, bounded by gap reset."""
 
-    def __init__(self, fps, gap_seconds):
+    def __init__(self, fps, gap_seconds, *, rules=None):
         import supervision as sv
+        from supervision.tracker.byte_tracker.single_object_track import STrack
+        if type(fps) is not int or not 1 <= fps <= 30 or not math.isfinite(gap_seconds) or gap_seconds <= 0:
+            raise ValueError('Invalid tracker cadence or gap')
         self.sv, self.fps, self.gap_seconds = sv, fps, gap_seconds
-        self.tracker = sv.ByteTrack(frame_rate=fps, track_activation_threshold=0.25, lost_track_buffer=30)
+        self.rules = rules or TrackingRules()
+        self._strack = STrack
+        self.tracker = sv.ByteTrack(frame_rate=fps, track_activation_threshold=self.rules.activation_threshold,
+                                    minimum_matching_threshold=self.rules.matching_threshold,
+                                    minimum_consecutive_frames=self.rules.confirmation_frames)
+        self.tracker.max_time_lost = max(1, math.ceil(fps * self.rules.lost_buffer_seconds))
         self.last_time = None
         self.generation = None
         self.last_tracks = []
         self.epoch = 0
+        self._tick_remainder = 0.0
+        self.metrics = {}
 
     def update(self, detections, at_seconds, generation):
         import numpy as np
+        if not math.isfinite(at_seconds) or at_seconds < 0 or not generation:
+            raise ValueError('Invalid tracker timestamp or generation')
+        if self.last_time is not None and self.generation == generation and at_seconds <= self.last_time:
+            raise ValueError("Tracker timestamps must advance")
+        reset_reason = None
         if self.generation != generation or (self.last_time is not None and at_seconds - self.last_time > self.gap_seconds):
+            reset_reason = 'GENERATION_CHANGED' if self.generation != generation else 'EVIDENCE_GAP'
+        extra_steps = 0
+        if not reset_reason and self.last_time is not None:
+            elapsed_ticks = (at_seconds - self.last_time) * self.fps + self._tick_remainder
+            elapsed_steps = math.floor(elapsed_ticks + 1e-8)
+            extra_steps = max(0, elapsed_steps - 1)
+            self._tick_remainder = max(0.0, elapsed_ticks - elapsed_steps)
+            if extra_steps + 1 > self.rules.max_prediction_steps:
+                reset_reason = 'PREDICTION_BUDGET'
+        if reset_reason:
             self.tracker.reset()
             self.epoch += 1
             self.last_time = None
-        if self.last_time is not None and at_seconds <= self.last_time:
-            raise ValueError("Tracker timestamps must advance")
+            self._tick_remainder = 0.0
+            extra_steps = 0
+        expired_lost = 0
         if self.last_time is not None:
-            ticks = max(0, round((at_seconds - self.last_time) * self.fps) - 1)
-            # Age the pinned ByteTrack clock without inventing empty detections.
-            # Feeding empty frames here deletes unconfirmed tracks whenever
-            # inference is slower than the target FPS, preventing stable IDs.
-            self.tracker.frame_id += ticks
+            # Advance motion and age together, without fabricated empty observations.
+            next_frame = self.tracker.frame_id + extra_steps + 1
+            retained = [track for track in self.tracker.lost_tracks
+                        if next_frame - track.frame_id <= self.tracker.max_time_lost]
+            expired_lost = len(self.tracker.lost_tracks) - len(retained)
+            self.tracker.lost_tracks = retained
+            pool = [track for track in self.tracker.tracked_tracks if track.is_activated] + self.tracker.lost_tracks
+            for _ in range(extra_steps):
+                self._strack.multi_predict(pool, self.tracker.shared_kalman)
+            self.tracker.frame_id += extra_steps
         inputs = self.sv.Detections(xyxy=np.asarray([d.box for d in detections], dtype=np.float32).reshape(-1, 4),
                                     confidence=np.asarray([d.confidence for d in detections], dtype=np.float32),
-                                    class_id=np.zeros(len(detections), dtype=int))
+                                    class_id=np.zeros(len(detections), dtype=int),
+                                    data={'source_index': np.arange(len(detections), dtype=int)})
         tracked = self.tracker.update_with_detections(inputs)
-        result = list(detections)
+        result = [Detection(d.box, d.confidence) for d in detections]
         self.last_tracks = []
-        used = set()
-        for box, confidence, identifier in zip(tracked.xyxy, tracked.confidence, tracked.tracker_id):
-            match = next((i for i, d in enumerate(result) if i not in used and tuple(box) == tuple(np.asarray(d.box, dtype=np.float32))), None)
-            if match is not None:
-                used.add(match)
+        source_indices = tracked.data.get('source_index', np.array([], dtype=int))
+        identifiers = tracked.tracker_id if tracked.tracker_id is not None else np.array([], dtype=int)
+        rejected = 0
+        if len(source_indices) == len(identifiers):
+            source_counts = Counter(int(i) for i in source_indices)
+            id_counts = Counter(int(i) for i in identifiers)
+            for index, identifier in zip(source_indices, identifiers):
+                match = int(index)
+                if not 0 <= match < len(result) or source_counts[match] != 1 or id_counts[int(identifier)] != 1 or identifier <= 0:
+                    rejected += 1
+                    continue
                 track_id = f"{generation}:{self.epoch}:{int(identifier)}"
-                result[match] = Detection(result[match].box, float(confidence), track_id)
+                result[match] = Detection(result[match].box, result[match].confidence, track_id)
                 self.last_tracks.append(track_id)
+        else:
+            rejected = len(identifiers)
         # Only current measured boxes are returned; predictions never create presence.
         self.last_time, self.generation = at_seconds, generation
+        self.metrics = {'algorithm': 'ByteTrack', 'available': True, 'measured_count': len(result),
+                        'matched_count': len(self.last_tracks), 'unmatched_count': len(result) - len(self.last_tracks),
+                        'active_tracks': len(self.tracker.tracked_tracks), 'lost_tracks': len(self.tracker.lost_tracks),
+                        'confirmed_tracks': sum(track.is_activated for track in self.tracker.tracked_tracks),
+                        'tentative_tracks': sum(not track.is_activated for track in self.tracker.tracked_tracks),
+                        'extra_prediction_steps': extra_steps, 'mapping_rejected': rejected,
+                        'expired_lost_tracks': expired_lost,
+                        'epoch': self.epoch, 'reset_reason': reset_reason}
         return result
 
 
-def associate(detections, zones, rules):
+def associate(detections, zones, rules, position=None):
+    if position is not None and position.mode != 'bbox_overlap':
+        return associate_positions(detections, zones, rules, position)
     occupants = {z.id: [] for z in zones}
     uncertain = set()
     for detection in detections:
@@ -95,6 +147,30 @@ def associate(detections, zones, rules):
         else:
             result[zone.id] = (State.EMPTY, 0, None)
     return result
+
+
+def associate_positions(detections, zones, rules, calibration):
+    from .positioning import contains, edge_distance, floor_polygon, measured_position
+    occupants = {z.id: [] for z in zones}
+    uncertain = set()
+    polygons = {z.id: floor_polygon(z.polygon, calibration) if calibration.mode == 'homography' else z.polygon for z in zones}
+    margin = calibration.floor_boundary_margin_m if calibration.mode == 'homography' else calibration.image_boundary_margin
+    for detection in detections:
+        position = measured_position(detection, calibration)
+        if not position['available']:
+            uncertain.update(z.id for z in zones if overlap_ratio(detection.box, z.polygon) > 0)
+            continue
+        point = position['floor_m'] if calibration.mode == 'homography' else position['anchor']
+        for group in {z.exclusive_group for z in zones}:
+            candidates = [(z, edge_distance(point, polygons[z.id])) for z in zones
+                          if z.exclusive_group == group and (contains(point, polygons[z.id]) or edge_distance(point, polygons[z.id]) <= margin)]
+            if len(candidates) == 1 and candidates[0][1] > margin and detection.confidence >= rules.strong_confidence:
+                occupants[candidates[0][0].id].append(detection)
+            else:
+                uncertain.update(z.id for z, _ in candidates)
+    return {z.id: (State.OCCUPIED, None if z.id in uncertain else len(occupants[z.id]), None) if occupants[z.id]
+            else (State.UNKNOWN, None, 'ZONE_AMBIGUOUS') if z.id in uncertain
+            else (State.EMPTY, 0, None) for z in zones}
 
 
 class OnnxDetector:
