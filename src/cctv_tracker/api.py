@@ -179,9 +179,54 @@ def create_app(database: Path, token: str, *, controller=None, ui_dir: Path | No
     def replay_status():
         return {'available': controller is not None, 'source': 'LOCAL_VIDEO_REPLAY',
                 'recorded': False, 'tracking_supported': True, 'duration_accounting': False,
+                'workstation_calibration': True,
                 'reid': {'mode': replay_tracking.settings.reid.mode,
                          'configured': replay_tracking.settings.reid.mode != 'off',
                          'recovery_policy': replay_tracking.settings.reid.recovery_policy}}
+
+    @app.get('/pilot/v1/replay/{replay_id}/calibration', dependencies=[Depends(authenticate)])
+    def get_replay_calibration(replay_id: str):
+        try:
+            return replay_tracking.calibration(replay_id)
+        except BlockingIOError as error:
+            raise HTTPException(status_code=429, detail=str(error)) from None
+        except ValueError:
+            raise HTTPException(status_code=422, detail='ID replay tidak valid') from None
+
+    @app.put('/pilot/v1/replay/{replay_id}/calibration', dependencies=[Depends(authenticate)],
+             openapi_extra={'requestBody': {'required': True, 'content': {'application/json': {'schema': {
+                 'type': 'object', 'additionalProperties': False,
+                 'required': ['expected_revision', 'association', 'zones'],
+                 'properties': {
+                     'expected_revision': {'type': 'integer', 'minimum': 0, 'maximum': 999999999},
+                     'association': {'enum': ['bbox_overlap', 'footpoint']},
+                     'zones': {'type': 'array', 'maxItems': 16, 'items': {
+                         'type': 'object', 'additionalProperties': False, 'required': ['id', 'name', 'polygon'],
+                         'properties': {
+                             'id': {'type': 'string', 'minLength': 1, 'maxLength': 80},
+                             'name': {'type': 'string', 'minLength': 1, 'maxLength': 80},
+                             'polygon': {'type': 'array', 'minItems': 3, 'maxItems': 32, 'items': {
+                                 'type': 'array', 'minItems': 2, 'maxItems': 2,
+                                 'items': {'type': 'number', 'minimum': 0, 'maximum': 1}}}}}}}
+             }}}}})
+    async def replay_calibration(replay_id: str, request: Request):
+        if not controller:
+            raise HTTPException(status_code=409, detail='Jalankan dashboard untuk kalibrasi replay')
+        body = bytearray()
+        async for chunk in request.stream():
+            if len(body) + len(chunk) > 32768:
+                raise HTTPException(status_code=413, detail='Kalibrasi terlalu besar')
+            body.extend(chunk)
+        try:
+            import json
+            payload = json.loads(body)
+            return await run_in_threadpool(replay_tracking.configure, replay_id, payload)
+        except ReplayConflict as error:
+            raise HTTPException(status_code=409, detail=str(error)) from None
+        except BlockingIOError as error:
+            raise HTTPException(status_code=429, detail=str(error)) from None
+        except (ValueError, UnicodeError) as error:
+            raise HTTPException(status_code=422, detail=str(error)) from None
 
     @app.post("/pilot/v1/webcam/frame", dependencies=[Depends(authenticate)])
     @app.post("/pilot/v1/replay/frame", dependencies=[Depends(authenticate)])

@@ -69,9 +69,9 @@ def test_dashboard_replay_reports_timeline_and_csv_match_sqlite(integrated):
     assert len(snapshot['cameras']) == 1 and len(snapshot['workspaces']) == 2
     result = client.get('/pilot/v1/reports', params={'run_id': completed['run_id']}).json()
     first = result['workstations'][0]
-    assert first['occupied_us'] == 4_000_000
+    assert first['occupied_us'] == 3_800_000
     assert first['empty_us'] == 1_800_000
-    assert first['unknown_us'] == 11_200_000
+    assert first['unknown_us'] == 11_400_000
     daily = result['daily'][0]
     assert daily['workspace_id'] == first['workspace_id']
     assert daily['occupied_us'] == first['occupied_us']
@@ -83,12 +83,12 @@ def test_dashboard_replay_reports_timeline_and_csv_match_sqlite(integrated):
     assert len(filtered['workstations']) == 1
     assert {r['workspaceId'] for r in filtered['intervals']} == {first['workspace_id']}
     csv = client.get('/pilot/v1/export.csv', params={'run_id': completed['run_id'],'workspace_id':first['workspace_id']})
-    assert 'SYNTHETIC_REPLAY' in csv.text and '4000000,1800000,11200000' in csv.text
+    assert 'SYNTHETIC_REPLAY' in csv.text and '3800000,1800000,11400000' in csv.text
     assert 'Meja A02' not in csv.text
     daily_csv = client.get('/pilot/v1/export.csv', params={'run_id': completed['run_id'], 'workspace_id': first['workspace_id'], 'daily': True})
     assert 'cctv-daily-report.csv' in daily_csv.headers['content-disposition']
     assert 'timezone=Asia/Jakarta' in daily_csv.text
-    assert '4000000,1800000,11200000' in daily_csv.text
+    assert '3800000,1800000,11400000' in daily_csv.text
     assert 'Meja A02' not in daily_csv.text
     assert client.get('/pilot/v1/reports', params={'run_id':'missing'}).status_code == 404
     assert client.get('/pilot/v1/reports', params={'start_utc_us':2,'end_utc_us':1}).status_code == 422

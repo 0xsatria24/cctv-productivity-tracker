@@ -52,6 +52,199 @@
         }
       }
     },
+    "/pilot/v1/replay/status": {
+      "get": {
+        "summary": "Replay Status",
+        "operationId": "replay_status_pilot_v1_replay_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/pilot/v1/replay/{replay_id}/calibration": {
+      "get": {
+        "summary": "Get Replay Calibration",
+        "operationId": "get_replay_calibration_pilot_v1_replay__replay_id__calibration_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "replay_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Replay Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Replay Calibration",
+        "operationId": "replay_calibration_pilot_v1_replay__replay_id__calibration_put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "replay_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Replay Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "expected_revision",
+                  "association",
+                  "zones"
+                ],
+                "properties": {
+                  "expected_revision": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 999999999
+                  },
+                  "association": {
+                    "enum": [
+                      "bbox_overlap",
+                      "footpoint"
+                    ]
+                  },
+                  "zones": {
+                    "type": "array",
+                    "maxItems": 16,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "id",
+                        "name",
+                        "polygon"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 80
+                        },
+                        "name": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 80
+                        },
+                        "polygon": {
+                          "type": "array",
+                          "minItems": 3,
+                          "maxItems": 32,
+                          "items": {
+                            "type": "array",
+                            "minItems": 2,
+                            "maxItems": 2,
+                            "items": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/pilot/v1/replay/frame": {
+      "post": {
+        "summary": "Webcam Frame",
+        "operationId": "webcam_frame_pilot_v1_replay_frame_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/pilot/v1/webcam/frame": {
       "post": {
         "summary": "Webcam Frame",
@@ -221,6 +414,47 @@
       "get": {
         "summary": "Live Preview",
         "operationId": "live_preview_pilot_v1_live_preview_jpg_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "frame_seq",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Frame Seq"
+            }
+          },
+          {
+            "name": "run_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Run Id"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -229,13 +463,18 @@
                 "schema": {}
               }
             }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
           }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
+        }
       }
     },
     "/pilot/v1/camera-wall": {
@@ -623,6 +862,16 @@
               "default": "replay",
               "title": "Dataset"
             }
+          },
+          {
+            "name": "daily",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Daily"
+            }
           }
         ],
         "responses": {
@@ -876,6 +1125,16 @@
             "maxLength": 64,
             "minLength": 64,
             "title": "Camera Key"
+          },
+          "position": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PositionInput"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,
@@ -1015,6 +1274,19 @@
             ],
             "title": "Url"
           },
+          "camera_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 80,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Camera Id"
+          },
           "preview_only": {
             "type": "boolean",
             "title": "Preview Only",
@@ -1106,6 +1378,81 @@
           "polygon"
         ],
         "title": "LiveZoneInput"
+      },
+      "PositionInput": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "bbox_overlap",
+              "footpoint",
+              "homography"
+            ],
+            "title": "Mode",
+            "default": "bbox_overlap"
+          },
+          "image_points": {
+            "items": {
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array",
+              "maxItems": 2,
+              "minItems": 2
+            },
+            "type": "array",
+            "maxItems": 4,
+            "title": "Image Points"
+          },
+          "floor_width_m": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1000.0,
+                "minimum": 0.1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Floor Width M"
+          },
+          "floor_depth_m": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1000.0,
+                "minimum": 0.1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Floor Depth M"
+          },
+          "image_boundary_margin": {
+            "type": "number",
+            "maximum": 0.1,
+            "exclusiveMinimum": 0.0,
+            "title": "Image Boundary Margin",
+            "default": 0.01
+          },
+          "floor_boundary_margin_m": {
+            "type": "number",
+            "maximum": 5.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Floor Boundary Margin M",
+            "default": 0.1
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "PositionInput"
       },
       "PreviewCameraInput": {
         "properties": {

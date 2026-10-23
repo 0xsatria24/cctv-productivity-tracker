@@ -80,10 +80,14 @@ def test_replay_sqlite_golden_totals_and_atomic_durability(tmp_path):
         result = replay(ROOT / "tests/fixtures/occupancy-replay.json", config, db)
         assert result["data_sources"] == ["SYNTHETIC_REPLAY"]
         first, second = result["workstations"]
-        assert first["occupied_us"] == 4_000_000
+        # The 0.2 s before the first contradictory frame is unknown, not occupied.
+        assert first["occupied_us"] == 3_800_000
         assert first["empty_us"] == 1_800_000
-        assert first["unknown_us"] == 11_200_000
+        assert first["unknown_us"] == 11_400_000
         assert first["eligible_us"] == 17_000_000
+        import json
+        metadata=json.loads(db.conn.execute('SELECT runtime_manifest_json FROM engine_runs').fetchone()[0])
+        assert metadata['evidence_policy_revision']=='last-supporting-sample-v2'
         assert second["empty_us"] == 6_000_000
         assert second["unknown_us"] == 11_000_000
         assert db.conn.execute("SELECT COUNT(*) FROM occupied_sessions WHERE workspace_id=?", (first["workspace_id"],)).fetchone()[0] == 2

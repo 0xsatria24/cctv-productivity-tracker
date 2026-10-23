@@ -90,6 +90,8 @@ class Database:
         site_id = stable_id("site:" + settings.site_name)
         camera_id = stable_id("camera:" + settings.camera_id)
         rule_values = asdict(settings.rules)
+        from .domain.occupancy import EVIDENCE_POLICY_REVISION
+        rule_values['evidence_policy_revision'] = EVIDENCE_POLICY_REVISION
         if settings.position.mode != 'bbox_overlap':
             rule_values['position_calibration'] = asdict(settings.position)
         rule_json = json.dumps(rule_values, sort_keys=True)
@@ -109,6 +111,7 @@ class Database:
                           "workspace_ids": [stable_id("workspace:" + settings.camera_id + ":" + z.id) for z in settings.zones],
                           'model_sha256': model_sha, 'calibration_revision': model_manifest.get('calibration_revision'),
                           'session_rules': asdict(settings.sessions),
+                          'evidence_policy_revision': EVIDENCE_POLICY_REVISION,
                           'detection_policy': asdict(settings.detection),
                           'tracking_policy': asdict(settings.tracking),
                           'position_calibration': asdict(settings.position),

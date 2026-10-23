@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { recentReplaySessions,replayCaptureSize,replayDisplayPacket } from '../src/replay-domain.js';
+import { recentReplaySessions,replayCaptureSize,replayDisplayPacket,storedReplayCalibration } from '../src/replay-domain.js';
 
 test('current timers precede lost fragments without rewriting their durations',()=>{
   const rows=[{session_id:'old',status:'LOST',last_seen_media_seconds:3,accumulated_duration_us:2e6},
@@ -27,4 +27,14 @@ test('held positions expire by media time including response latency and playbac
   assert.ok(Math.abs(fresh.lifetime-50)<.01);
   assert.deepEqual(replayDisplayPacket(packet,1.3,1).packet.display_detections,[measured]);
   assert.equal(replayDisplayPacket({media_time_seconds:1,detections:[measured]},1.1,1).lifetime,750);
+});
+
+test('corrupt browser calibration cannot become a rendered or active workstation',()=>{
+  const zone={id:'a',name:'Meja',polygon:[[.1,.1],[.9,.1],[.9,.9],[.1,.9]]};
+  const value={association:'bbox_overlap',zones:[zone]};
+  assert.deepEqual(storedReplayCalibration(value),value);
+  for(const invalid of [null,{}, {...value,zones:[zone,zone]}, {...value,zones:[{...zone,polygon:[null]}]},
+    {...value,zones:[{...zone,polygon:[[0,0],[1,1],[0,1],[1,0]]}]}, {...value,association:'unknown'}]) {
+    assert.equal(storedReplayCalibration(invalid),null);
+  }
 });

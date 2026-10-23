@@ -6,6 +6,14 @@ Edisi tambahan **CCTV Headless Engine** tersedia tanpa frontend, dengan API mult
 
 Headless, live dashboard, dan replay memakai [penjadwalan inference per sumber](docs/runtime/INFERENCE-SCHEDULING.md) agar giliran model dan antreannya terbatas. Batas FPS tetap bergantung kapasitas perangkat.
 
+Replay kini menyediakan **Kalibrasi zona** dan total **durasi workstation** yang
+terpisah dari ID orang. Total terisi tetap tersimpan saat sesi orang berganti;
+waktu tanpa bukti dicatat terpisah sebagai tidak pasti. Sesi orang/ReID berada
+di detail eksperimental. Jalankan `npm.cmd --prefix prototype run dev:reid`,
+buka `http://localhost:5174/#/live`, pilih video, terapkan zona, aktifkan deteksi
+preview, lalu putar. Seek atau perubahan zona memulai pengukuran replay baru.
+Target dan batas validasi rilis: [Workstation release](docs/runtime/WORKSTATION-RELEASE.md).
+
 Status: dashboard React sudah terhubung ke engine Python melalui API lokal dan SQLite. Satu server menyajikan UI dan API; replay dapat dimulai/dihentikan dari dashboard. Preview beberapa kamera tersedia dalam grid 1/4/9/16. Tracking, zona dan durasi live masih satu sumber aktif; native GUI, inferensi banyak kamera dan acceptance produksi belum selesai.
 
 Jalankan aplikasi terintegrasi di PowerShell dari folder proyek:

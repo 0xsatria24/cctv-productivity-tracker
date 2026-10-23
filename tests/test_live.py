@@ -236,9 +236,9 @@ def test_confirmed_enter_exit_and_no_double_count_with_multiple_people(tmp_path)
             pipeline.feed(people, 1_000_000 + i * 1_000_000, (i + 1) * 1_000_000_000, i + 1, 'generation')
         report = pipeline.finish()
         row = report['workstations'][0]
-        assert row['occupied_us'] == 2_000_000
+        assert row['occupied_us'] == 1_000_000
         assert row['empty_us'] == 1_000_000
-        assert row['unknown_us'] == 4_000_000
+        assert row['unknown_us'] == 5_000_000
         assert db.conn.execute('SELECT COUNT(*) FROM event_log WHERE event_type="ENTER"').fetchone()[0] == 1
         assert db.conn.execute('SELECT COUNT(*) FROM event_log WHERE event_type="EXIT"').fetchone()[0] == 1
 

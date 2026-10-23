@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, FileVideo, Maximize, Pause, Play, RotateCcw, Trash2 } from 'lucide-react';
 import { Button, Field, Panel } from './components';
 import './video-replay.css';
-import { recentReplaySessions, replayCaptureSize, replayDisplayPacket } from './replay-domain';
+import { recentReplaySessions, replayCaptureSize, replayDisplayPacket, storedReplayCalibration } from './replay-domain';
+import { ReplayCalibration } from './replay-calibration';
 
 const LIMIT = 16;
 const time = value => {
@@ -83,12 +84,20 @@ function ReplayTile({ file, shown, engineAvailable, onRemove }) {
   const [speed, setSpeed] = useState(1), [loop, setLoop] = useState(false), [error, setError] = useState('');
   const [analysisEnabled, setAnalysisEnabled] = useState(false), [analysis, setAnalysis] = useState(null), [engineError, setEngineError] = useState('');
   const [sessions, setSessions] = useState([]);
+  const [workstations,setWorkstations]=useState([]), [calibrationImage,setCalibrationImage]=useState(null);
+  const lastWorkstationEvidence=useRef(null);
+  const [calibration,setCalibration]=useState(()=>{
+    try {const saved=storedReplayCalibration(JSON.parse(localStorage.getItem(`replay-zones-v1:${file.key}`)));if(saved)return saved;} catch { /* Storage can be unavailable in private sessions. */ }
+    return {zones:[],association:'bbox_overlap'};
+  });
+  const calibrationRevision=useRef(0);
+  const [calibrated,setCalibrated]=useState(false), [calibrationNotice,setCalibrationNotice]=useState('');
   const [dimensions, setDimensions] = useState({ width:16, height:9 });
   const [frameSize, setFrameSize] = useState({width:640,height:360});
   const ready = duration > 0 && !error;
   const enabled = engineAvailable && analysisEnabled && shown;
   const invalidate = () => { epoch.current++; setAnalysis(null); };
-  const newTimeline = () => { timeline.current++; lastMediaTime.current=null; setSessions([]); invalidate(); };
+  const newTimeline = () => { timeline.current++; lastMediaTime.current=null; setSessions([]);setWorkstations([]); invalidate(); };
   useEffect(()=>{
     const frame=video.current?.parentElement;
     if(!frame)return;
@@ -119,7 +128,7 @@ function ReplayTile({ file, shown, engineAvailable, onRemove }) {
         if (!blob) throw new Error('Frame replay belum dapat dibaca');
         const response = await fetch('/pilot/v1/replay/frame', {method:'POST', credentials:'same-origin',
           headers:{'Content-Type':'image/jpeg', 'X-Replay-Id':file.id, 'X-Replay-Generation':String(requestTimeline),
-            'X-Replay-Sequence':String(requestSequence), 'X-Replay-Time':String(mediaTime)},
+            'X-Replay-Sequence':String(requestSequence), 'X-Replay-Time':String(mediaTime), 'X-Replay-Calibration':String(calibrationRevision.current)},
           body:blob, signal:AbortSignal.any([controller.signal, AbortSignal.timeout(10000)])});
         const packet = await response.json();
         if (!response.ok) throw new Error(typeof packet.detail === 'string' ? packet.detail : 'Deteksi replay tidak tersedia');
@@ -129,6 +138,8 @@ function ReplayTile({ file, shown, engineAvailable, onRemove }) {
         clearTimeout(expiry);
         if (performance.now()-started > 1000 || Math.abs(element.currentTime-mediaTime) > .5) { setAnalysis(null); return; }
         setSessions(recentReplaySessions(packet.sessions || []));
+        setWorkstations(packet.workstations || []);
+        lastWorkstationEvidence.current={mediaTime:packet.media_time_seconds,received:performance.now()};
         const display = replayDisplayPacket(packet,element.currentTime,element.playbackRate);
         setAnalysis(display.packet);
         expiry = setTimeout(() => setAnalysis(null), display.lifetime);
@@ -147,10 +158,38 @@ function ReplayTile({ file, shown, engineAvailable, onRemove }) {
     try { await element.play(); } catch { setError('Video belum dapat diputar. Coba pilih MP4 H.264 atau WebM.'); }
   }
   function reset() { video.current.pause(); newTimeline(); video.current.currentTime = 0; setPosition(0); }
+  function openCalibration() {
+    const element=video.current;
+    if(!element || element.readyState<2)return;
+    element.pause();invalidate();setEngineError('');
+    try {
+      const canvas=document.createElement('canvas'),size=replayCaptureSize(element.videoWidth,element.videoHeight);
+      canvas.width=size.width;canvas.height=size.height;canvas.getContext('2d').drawImage(element,0,0,size.width,size.height);
+      setCalibrationImage({url:canvas.toDataURL('image/jpeg',.9),...size});
+    } catch {setEngineError('Frame belum dapat dibaca. Putar video sebentar lalu coba lagi.');}
+  }
+  async function saveCalibration(value) {
+    const url=`/pilot/v1/replay/${file.id}/calibration`;
+    const options={credentials:'same-origin',signal:AbortSignal.timeout(10000)};
+    const current=await fetch(url,options), state=await current.json();
+    if(!current.ok)throw new Error(state.detail || 'Kalibrasi belum dapat dibaca');
+    const response=await fetch(url,{...options,method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({...value,expected_revision:state.calibration_revision})});
+    const packet=await response.json();
+    if(!response.ok)throw new Error(packet.detail || 'Kalibrasi ditolak engine');
+    calibrationRevision.current=packet.calibration_revision;
+    newTimeline();timeline.current=Math.max(timeline.current,packet.minimum_generation);
+    sequence.current=Math.max(sequence.current,packet.minimum_sequence-1);
+    setCalibration(value);setCalibrated(true);setCalibrationNotice('Zona diterapkan. Pengukuran baru dimulai saat video diputar.');
+    try {localStorage.setItem(`replay-zones-v1:${file.key}`,JSON.stringify(value));}
+    catch {setCalibrationNotice('Zona diterapkan untuk sesi ini. Browser tidak dapat menyimpan kalibrasi.');}
+  }
   async function fullscreen() {
     try { if (document.fullscreenElement === tile.current) await document.exitFullscreen(); else await tile.current.requestFullscreen(); }
     catch { setEngineError('Fullscreen tidak tersedia di browser ini.'); }
   }
+  const workstationFresh=lastWorkstationEvidence.current && !engineError
+    && performance.now()-lastWorkstationEvidence.current.received<1000
+    && Math.abs(position-lastWorkstationEvidence.current.mediaTime)<1;
   return <article hidden={!shown} className="replay-tile" ref={tile} data-testid="video-replay-tile">
     <header><div><span className="replay-badge">REPLAY LOKAL</span><h3 title={file.name}>{file.name}</h3></div><Button icon={Trash2} aria-label={`Hapus replay ${file.name}`} onClick={onRemove}/></header>
     <div className="replay-frame">
@@ -162,20 +201,33 @@ function ReplayTile({ file, shown, engineAvailable, onRemove }) {
       {enabled && analysis && <svg className="replay-overlay" viewBox={`0 0 ${dimensions.width} ${dimensions.height}`} aria-label="Deteksi orang pada replay">{analysis.display_detections?.map((row, i) => {
         const [x1,y1,x2,y2] = row.box, w=dimensions.width, h=dimensions.height;
         const held=row.measured === false, weak=row.evidence_state === 'WEAK';
-        const label = row.session_id ? row.recovery_pending ? 'Mencocokkan sesi...' : `${row.session_id.slice(0,6)} · ${time(row.accumulated_duration_us/1e6)}${held ? ' · posisi terakhir' : weak ? ' · bukti lemah' : ''}` : 'Menunggu sesi';
+        const label = row.session_id ? row.recovery_pending ? 'Mencocokkan sesi...' : `${row.session_id.slice(0,6)}${held ? ' · posisi terakhir' : weak ? ' · bukti lemah' : ''}` : 'Menunggu sesi';
         const font=12*Math.max(w/frameSize.width,h/frameSize.height), labelWidth=Math.min(w, label.length*font*.62+font), labelX=Math.max(0,Math.min(x1*w,w-labelWidth)), labelY=Math.max(0,y1*h-font*1.5);
         return <g key={row.session_id || i}><rect className="replay-person-box" strokeDasharray={held ? '5 4' : undefined} x={x1*w} y={y1*h} width={(x2-x1)*w} height={(y2-y1)*h}><title>{held ? 'Posisi terakhir; belum ada deteksi baru. Timer dibekukan.' : `Orang terdeteksi, confidence ${Math.round(row.confidence*100)}%`}</title></rect><rect className="replay-timer-background" x={labelX} y={labelY} width={labelWidth} height={font*1.5}/><text className="replay-person-timer" x={labelX+font*.4} y={labelY+font*1.08} fontSize={font}>{label}</text></g>;
       })}</svg>}
+      {calibrated&&<svg className="replay-overlay replay-zones" viewBox={`0 0 ${dimensions.width} ${dimensions.height}`} aria-label="Zona workstation replay">{calibration.zones.map(zone=><polygon key={zone.id} points={zone.polygon.map(([x,y])=>`${x*dimensions.width},${y*dimensions.height}`).join(' ')}><title>{zone.name}</title></polygon>)}</svg>}
     </div>
     <div className="replay-controls">
       <div className="inline-controls"><Button icon={playing ? Pause : Play} disabled={!ready} onClick={playPause}>{playing ? 'Jeda' : 'Putar'}</Button><Button icon={RotateCcw} disabled={!ready} onClick={reset}>Dari awal</Button><Button icon={Maximize} aria-label={`Fullscreen replay ${file.name}`} onClick={fullscreen}/><span className="replay-time">{time(position)} / {time(duration)}</span></div>
       <input type="range" min="0" max={duration || 0} step="0.1" value={Math.min(position, duration)} disabled={!ready} aria-label={`Posisi replay ${file.name}`} onChange={e => { invalidate(); video.current.currentTime = Number(e.target.value); setPosition(Number(e.target.value)); }}/>
       <div className="inline-controls"><Field label="Kecepatan"><select aria-label={`Kecepatan ${file.name}`} value={speed} disabled={!ready} onChange={e => { const value=Number(e.target.value); setSpeed(value); video.current.playbackRate=value; invalidate(); }}>{[.5,1,1.5,2].map(value => <option key={value} value={value}>{value}x</option>)}</select></Field><label className="check-control"><input type="checkbox" checked={loop} onChange={e => setLoop(e.target.checked)}/>Ulangi</label><label className="check-control"><input type="checkbox" checked={analysisEnabled} disabled={!engineAvailable || !ready} onChange={e => { invalidate(); setAnalysisEnabled(e.target.checked); }}/>Deteksi preview</label></div>
       <p className="caption" data-testid="replay-analysis-status">{!engineAvailable ? 'Preview lokal; engine belum terhubung.' : !analysisEnabled ? 'Deteksi preview nonaktif.' : !playing ? 'Deteksi dijeda bersama video.' : analysis ? `${analysis.count} orang terdeteksi · ${analysis.inference_ms} ms/frame · durasi replay, tidak masuk laporan` : 'Menunggu frame deteksi baru.'}</p>
+      <div className="replay-workstations" aria-label="Durasi workstation replay">
+        <div className="inline-controls"><strong>Durasi workstation</strong><Button disabled={!engineAvailable || !ready} onClick={openCalibration}>Kalibrasi zona</Button></div>
+        {!calibrated?<p className="caption">{calibration.zones.length?'Kalibrasi file ini tersimpan di browser. Buka kalibrasi dan terapkan untuk sesi ini.':'Tandai zona workstation untuk mulai mengukur keterisian area.'}</p>:!calibration.zones.length?<p className="caption">Tidak ada zona aktif.</p>:!workstations.length?<p className="caption">Zona siap. Aktifkan deteksi preview dan putar video untuk mulai mengukur.</p>:<div className="replay-workstation-rows">{workstations.map(row=><div key={row.zone_id} data-zone-id={row.zone_id}>
+          <div><strong>{row.name}</strong><span>{!engineAvailable?'Engine terputus':!analysisEnabled?'Deteksi nonaktif':!playing?'Dijeda':!workstationFresh?'Tidak pasti: bukti kedaluwarsa':row.state==='OCCUPIED'?'Terisi':row.state==='EMPTY'?'Tidak terdeteksi setelah konfirmasi':row.reason==='PENDING_CONFIRMATION'?'Tidak pasti: menunggu konfirmasi':'Tidak pasti: bukti ambigu'}</span></div>
+          <dl><div><dt>Terisi</dt><dd>{time(row.occupied_us/1e6)}</dd></div><div><dt>Kosong</dt><dd>{time(row.empty_us/1e6)}</dd></div><div><dt>Tidak pasti</dt><dd>{time(row.unknown_us/1e6)}</dd></div><div><dt>Cakupan bukti</dt><dd>{row.coverage===null?'Belum tersedia':`${Math.round(row.coverage*100)}%`}</dd></div></dl>
+        </div>)}</div>}
+        <p className="caption">Total per zona tidak bergantung ID orang. Bukti lemah dan jeda frame tidak menambah durasi terisi. Seek, putar ulang, atau perubahan zona memulai pengukuran baru. Keterisian bukan produktivitas.</p>
+        {calibrationNotice&&<p role="status" className="caption">{calibrationNotice}</p>}
+      </div>
+      <details className="replay-person-details"><summary>Sesi orang (eksperimental)</summary>
       {analysisEnabled && analysis?.reid && <p className="caption" data-testid="replay-reid-status">{analysis.reid.mode === 'off' ? 'ReID nonaktif pada engine ini.' : `ReID ${analysis.reid.mode === 'active' ? 'aktif (eksperimental)' : 'shadow'} · ${['SHADOW','ACTIVE'].includes(analysis.reid.status) ? `${analysis.reid.gallery_sessions} sesi dalam gallery · ${analysis.reid.mode === 'active' ? `${analysis.session_metrics?.reid_recovered || 0} recovery visual terkonfirmasi` : `${analysis.reid.decisions.filter(row=>row.action==='WOULD_MATCH').length} usulan cocok`}` : ({SAMPLE_INTERVAL:'menunggu sampel berikutnya', PROVIDER_ERROR:'model gagal; periksa konfigurasi dan mulai ulang engine', DISABLED_AFTER_ERROR:'dinonaktifkan setelah error; mulai ulang engine', LATENCY_BUDGET:'melewati anggaran waktu; mulai ulang engine', NO_PIXELS:'frame tidak tersedia'})[analysis.reid.status] || analysis.reid.status}. ${analysis.reid.mode === 'active' ? 'Sesi disambung hanya setelah konfirmasi; waktu selama hilang tidak ditambahkan.' : 'Pencocokan visual belum mengubah timer.'}`}</p>}
       {!!sessions.length && <div className="replay-session-times" aria-label="Durasi sesi replay">{sessions.slice(0,6).map(session=><span key={session.session_id} data-session-id={session.session_id}>{session.session_id.slice(0,6)} · <strong>{session.recovery_pending ? 'Memastikan identitas...' : time(session.accumulated_duration_us/1e6)}</strong> · {session.status==='LOST'?'Hilang sementara':session.evidence_state==='WEAK'?'Bukti lemah; timer dibekukan':'Terlihat'}</span>)}{sessions.length>6&&<span>+{sessions.length-6} sesi lain</span>}</div>}
       {analysisEnabled && <p className="caption">Timer mengikuti bukti pada waktu video dan dibekukan saat bukti lemah atau orang hilang. Box putus-putus menandai posisi terakhir, maksimal 0,4 detik. Identitas yang tidak pasti tetap menjadi sesi terpisah; seek atau putar ulang memulai sesi baru.</p>}
+      </details>
       {error && <p className="error-text" role="alert">{error}</p>}{engineError && <p className="error-text" role="alert">{engineError}</p>}
     </div>
+    {calibrationImage&&<ReplayCalibration initial={calibration} image={calibrationImage} onClose={()=>setCalibrationImage(null)} onSave={saveCalibration}/>}
   </article>;
 }
