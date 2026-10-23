@@ -26,11 +26,14 @@ class FixtureDetector:
         self.rows = [{'box': [0.1, 0.1, 0.4, 0.8], 'confidence': 0.95}]
         self.width, self.height = 320, 240
         self.fail = False
+        self.candidates = []
 
     def detect(self, _):
         if self.fail:
             raise RuntimeError('Injected inference failure')
-        return {'width': self.width, 'height': self.height, 'detections': [dict(d) for d in self.rows], 'count': len(self.rows), 'model': 'TEST FIXTURE', 'inference_ms': 1}
+        return {'width': self.width, 'height': self.height, 'detections': [dict(d) for d in self.rows],
+                'tracking_candidates': [dict(d) for d in self.candidates],
+                'count': len(self.rows), 'model': 'TEST FIXTURE', 'inference_ms': 1}
 
 
 def wait_for(predicate, seconds=10):
@@ -63,6 +66,27 @@ def test_calibration_validation_and_camera_binding(live):
     # Reconstruct using the original replay path, not another '-live' suffix.
     loaded = LiveController(replace(controller.settings, database=controller.settings.database.with_name('replay.sqlite3')), FixtureDetector())
     assert loaded.snapshot()['calibrations']['WEBCAM_LIVE']['revision'] == 1
+
+
+def test_live_confidence_candidate_reaches_tracker_without_counting_time(live):
+    controller,detector=live
+    session=controller.start('WEBCAM_LIVE',camera_key='a'*64)['session_id']
+    wait_for(lambda:controller.snapshot()['status']=='RUNNING')
+    first=controller.submit(b'fixture',session,1)['detections'][0]
+    time.sleep(.15)
+    second=controller.submit(b'fixture',session,2)['detections'][0]
+    assert second['accumulated_duration_us']>0
+    measured=detector.rows
+    detector.candidates=[{**measured[0],'confidence':.2}];detector.rows=[]
+    time.sleep(.15)
+    weak=controller.submit(b'fixture',session,3)
+    assert weak['count']==0 and weak['detections']==[]
+    assert weak['tracking']['matched_tracking_candidates']==1
+    detector.rows=measured;detector.candidates=[]
+    time.sleep(.15)
+    returned=controller.submit(b'fixture',session,4)['detections'][0]
+    assert returned['session_id']==first['session_id']
+    assert returned['accumulated_duration_us']==second['accumulated_duration_us']
 
 
 def test_live_tracking_durations_gap_duplicate_stop_and_database_isolation(live):

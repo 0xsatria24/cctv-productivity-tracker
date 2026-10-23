@@ -16,6 +16,8 @@ model tetap sama; perubahan ini tidak memasang model baru atau ReID.
   hasil normalisasi box, dan sumber frame tetap bisa ditelusuri.
 
 Mode biasa (`balanced`) tetap satu inference per frame dan confidence 0.45.
+Kandidat tracking kini memakai jalur terpisah mulai 0.10; kandidat itu tidak
+masuk jumlah orang publik atau durasi terisi. Lihat [confidence paths](CONFIDENCE-PATHS.md).
 Peningkatan resolusi capture tidak mengubah input model menjadi 1280; model tetap
 640. Dampak terhadap akurasi dan kapasitas RTSP nyata masih harus diukur.
 
@@ -55,6 +57,7 @@ valid. Parameter khusus ini hanya didukung YOLOX, bukan NanoDet.
 ```json
 "detection": {
   "confidence": 0.45,
+  "tracking_confidence": 0.1,
   "nms_iou": 0.5,
   "detail": false,
   "tile_overlap": 0.5
@@ -62,7 +65,10 @@ valid. Parameter khusus ini hanya didukung YOLOX, bukan NanoDet.
 ```
 
 `tile_overlap` menerima 0.1 sampai 0.5. Nilainya adalah overlap relatif terhadap
-ukuran tile. Confidence dan NMS IoU harus finite dan berada di antara 0 dan 1.
+ukuran tile. NMS IoU harus finite dan berada di antara 0 dan 1.
+`tracking_confidence` harus finite dalam [0.1, confidence]; confidence publik
+tetap di bawah 1. Nilai tracking sama dengan confidence publik menonaktifkan
+jalur kandidat tambahan.
 CLI dashboard menyediakan `--detection-profile` dan `--detection-confidence`.
 Launcher juga menerima `-DetectionConfidence`, misalnya 0.35 untuk eksperimen
 terukur. Menurunkan confidence dapat menambah false positive; nilai default tidak

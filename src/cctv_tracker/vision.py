@@ -16,6 +16,7 @@ class Detection:
     box: tuple[float, float, float, float]
     confidence: float
     track_id: str | None = None
+    tracking_only: bool = False
 
     def __post_init__(self):
         if len(self.box) != 4 or any(not math.isfinite(v) or not 0 <= v <= 1 for v in self.box):
@@ -24,6 +25,15 @@ class Detection:
             raise ValueError("Detection rectangle has no area")
         if not math.isfinite(self.confidence) or not 0 <= self.confidence <= 1:
             raise ValueError("Detection confidence must be in [0,1]")
+        if type(self.tracking_only) is not bool:
+            raise ValueError('tracking_only must be boolean')
+
+
+def frame_detections(packet):
+    public=[Detection(tuple(row['box']),row['confidence']) for row in packet['detections']]
+    candidates=[Detection(tuple(row['box']),row['confidence'],tracking_only=True)
+                for row in packet.get('tracking_candidates',[])[:128]]
+    return public+candidates
 
 
 class Tracker:
@@ -88,7 +98,7 @@ class Tracker:
                                     class_id=np.zeros(len(detections), dtype=int),
                                     data={'source_index': np.arange(len(detections), dtype=int)})
         tracked = self.tracker.update_with_detections(inputs)
-        result = [Detection(d.box, d.confidence) for d in detections]
+        result = [Detection(d.box, d.confidence, tracking_only=d.tracking_only) for d in detections]
         self.last_tracks = []
         source_indices = tracked.data.get('source_index', np.array([], dtype=int))
         identifiers = tracked.tracker_id if tracked.tracker_id is not None else np.array([], dtype=int)
@@ -102,7 +112,7 @@ class Tracker:
                     rejected += 1
                     continue
                 track_id = f"{generation}:{self.epoch}:{int(identifier)}"
-                result[match] = Detection(result[match].box, result[match].confidence, track_id)
+                result[match] = Detection(result[match].box, result[match].confidence, track_id, result[match].tracking_only)
                 self.last_tracks.append(track_id)
         else:
             rejected = len(identifiers)
@@ -116,6 +126,9 @@ class Tracker:
                         'extra_prediction_steps': extra_steps, 'mapping_rejected': rejected,
                         'expired_lost_tracks': expired_lost,
                         'epoch': self.epoch, 'reset_reason': reset_reason}
+        self.metrics.update(tracking_candidates=sum(d.tracking_only for d in result),
+                            matched_tracking_candidates=sum(d.tracking_only and d.track_id is not None for d in result),
+                            public_measured_count=sum(not d.tracking_only for d in result))
         return result
 
 
@@ -133,7 +146,7 @@ def associate(detections, zones, rules, position=None):
                 continue
             if len(matches) > 1 and matches[0][1] - matches[1][1] <= rules.ambiguity_margin:
                 uncertain.update(z.id for z, score in matches if matches[0][1] - score <= rules.ambiguity_margin)
-            elif detection.confidence < rules.strong_confidence:
+            elif detection.tracking_only or detection.confidence < rules.strong_confidence:
                 uncertain.add(matches[0][0].id)
             else:
                 occupants[matches[0][0].id].append(detection)
@@ -164,7 +177,7 @@ def associate_positions(detections, zones, rules, calibration):
         for group in {z.exclusive_group for z in zones}:
             candidates = [(z, edge_distance(point, polygons[z.id])) for z in zones
                           if z.exclusive_group == group and (contains(point, polygons[z.id]) or edge_distance(point, polygons[z.id]) <= margin)]
-            if len(candidates) == 1 and candidates[0][1] > margin and detection.confidence >= rules.strong_confidence:
+            if len(candidates) == 1 and candidates[0][1] > margin and detection.confidence >= rules.strong_confidence and not detection.tracking_only:
                 occupants[candidates[0][0].id].append(detection)
             else:
                 uncertain.update(z.id for z, _ in candidates)

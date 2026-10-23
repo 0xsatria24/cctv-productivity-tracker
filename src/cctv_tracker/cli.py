@@ -56,7 +56,7 @@ def main(argv=None):
     dashboard.add_argument('--detector', choices=['nanodet', 'yolox', 'yolox-openvino'], default='yolox-openvino', help='YOLOX OpenVINO: optimized quality mode; yolox: ONNX baseline; nanodet: lightweight')
     dashboard.add_argument('--openvino-device', choices=['CPU', 'GPU'], default='GPU', help='Explicit OpenVINO device; no silent fallback')
     dashboard.add_argument('--detection-profile', choices=['balanced', 'detail'], help='YOLOX detail runs full frame plus overlapping tiles; costs up to five model passes')
-    dashboard.add_argument('--detection-confidence', type=float, help='YOLOX person confidence in (0,1); lower values require false-positive validation')
+    dashboard.add_argument('--detection-confidence', type=float, help='YOLOX public person confidence >= tracking_confidence; lower values require false-positive validation')
     dashboard.add_argument("--ui-dir", type=Path, default=Path(__file__).resolve().parents[2] / "prototype" / "dist")
     args = parser.parse_args(argv)
     logger = configure_logging(args.log_dir or app_data() / "logs")

@@ -23,6 +23,7 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--seconds', type=float, default=20)
     parser.add_argument('--confidence', type=float, default=.45)
+    parser.add_argument('--tracking-confidence', type=float, default=.1)
     parser.add_argument('--calibration', type=Path, help='Replay calibration JSON: zones and association, independently drawn')
     parser.add_argument('--device', choices=['CPU','GPU'], default='GPU')
     parser.add_argument('--profiles', nargs='+', choices=['balanced','detail','nanodet'], default=['balanced','detail'])
@@ -58,7 +59,7 @@ def main():
         parser.error('Video must contain at least two sampled frames')
     results = {}
     for name in args.profiles:
-        tuning = DetectionTuning(confidence=args.confidence, detail=name=='detail')
+        tuning = DetectionTuning(confidence=args.confidence, tracking_confidence=args.tracking_confidence, detail=name=='detail')
         detector = NanoDetDetector() if name=='nanodet' else OpenVinoYoloX(device=args.device, tuning=tuning)
         manifest = Path(__file__).resolve().parents[1]/'models/reid/person-reidentification-retail-0287/manifest.json'
         rules = ReIdRules(mode=args.reid_mode, manifest_path=str(manifest), recovery_policy=args.reid_policy,
@@ -77,15 +78,18 @@ def main():
             times.append((time.perf_counter()-began)*1000)
             seen.update(d['session_id'] for d in packet['detections'] if d['session_id'])
             rows.append({'time':elapsed,'image':str(path),'count':packet['count'],'detections':packet['detections'],
-                         'workstations':packet['workstations'],'reid':packet['reid']})
+                         'workstations':packet['workstations'],'reid':packet['reid'],'tracking':packet['tracking']})
         manager = replay.streams[replay_id].sessions
         results[name] = {'frames':len(rows),'video':str(args.video),'device':'CPU' if name=='nanodet' else args.device,'detector':dict(detector.manifest),
-                         'confidence':args.confidence,'reid_mode':args.reid_mode,'calibration_revision':revision,
+                         'confidence':args.confidence,'tracking_confidence':args.tracking_confidence,
+                         'reid_mode':args.reid_mode,'calibration_revision':revision,
                          'empty_frames':sum(not r['count'] for r in rows),
                          'sessions_created':len(seen),'session_metrics':dict(manager.metrics),
                          'unmerged_session_starts':manager.metrics['started']-manager.metrics['recovered'],
                          'warm_median_ms':round(statistics.median(times[1:]),2),'rows':rows}
         results[name]['workstation_totals']=rows[-1]['workstations']
+        results[name]['tracking_candidates']=sum(r['tracking']['tracking_candidates'] for r in rows)
+        results[name]['matched_tracking_candidates']=sum(r['tracking']['matched_tracking_candidates'] for r in rows)
         print(name, json.dumps({k:v for k,v in results[name].items() if k!='rows'}),flush=True)
     args.output.parent.mkdir(parents=True,exist_ok=True)
     args.output.write_text(json.dumps(results,indent=2),encoding='utf-8')

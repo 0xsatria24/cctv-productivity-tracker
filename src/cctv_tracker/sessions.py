@@ -220,7 +220,7 @@ class SessionManager:
                     zone.outside_count = 0
 
     def _new(self, detection, utc, at, generation):
-        if detection.confidence < self.settings.rules.strong_confidence:
+        if detection.tracking_only or detection.confidence < self.settings.rules.strong_confidence:
             self._diagnose('weak_session_rejected')
             return None
         if len(self.sessions) >= self.rules.max_sessions:
@@ -276,10 +276,11 @@ class SessionManager:
 
     def recovery_score(self, old, candidate, detection, at):
         """Shared motion gate for session recovery and shadow appearance proposals."""
-        if detection.confidence < self.settings.rules.strong_confidence:
+        if detection.tracking_only or detection.confidence < self.settings.rules.strong_confidence:
             return None
         gap = candidate.first_ns - old.last_ns
-        if gap <= 0 or gap > self.rules.motion_recovery_seconds * NS:
+        strong_at = old.last_strong_ns if old.last_strong_ns is not None else old.last_ns
+        if gap <= 0 or candidate.first_ns - strong_at > self.rules.motion_recovery_seconds * NS:
             return None
         score = self._score(old, candidate.box, at, recovery=True)
         prior = self._velocity(old)
@@ -318,7 +319,7 @@ class SessionManager:
         raw_counts = Counter(d.track_id for d in detections if d.track_id is not None)
 
         def active_score(session, detection):
-            strong = detection.confidence >= self.settings.rules.strong_confidence
+            strong = not detection.tracking_only and detection.confidence >= self.settings.rules.strong_confidence
             continuing = (self.continuation_confidence is not None
                           and detection.confidence >= self.continuation_confidence
                           and detection.track_id is not None and raw_counts[detection.track_id] == 1
@@ -334,7 +335,7 @@ class SessionManager:
         for i, detection in enumerate(detections):
             session = self.sessions.get(pairs.get(i))
             if session:
-                strong = detection.confidence >= self.settings.rules.strong_confidence
+                strong = not detection.tracking_only and detection.confidence >= self.settings.rules.strong_confidence
                 delta = at - session.last_ns if strong and session.last_observation_strong else 0
                 session.accumulated_ns += delta
                 self._observe_zones(session, detection, utc, delta)

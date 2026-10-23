@@ -51,11 +51,13 @@ def main():
             response.raise_for_status()
             packet = response.json()
             assert packet['recorded'] is False and packet['duration_accounting'] is False
+            assert packet['count']==len(packet['detections'])==packet['tracking']['public_measured_count']
+            assert packet['tracking']['tracking_candidates']==len(packet.get('tracking_candidates',[]))<=128
             report = packet['reid']
             statuses[report['status']] += 1
             rejected.update(row['reason'] for row in report['rejections'])
             rows.append({'frame': seq, 'media_seconds': elapsed, 'people': packet['count'],
-                         'inference_ms': packet['inference_ms'], 'reid': report})
+                         'inference_ms': packet['inference_ms'], 'reid': report,'tracking':packet['tracking']})
             print(json.dumps({'frame': seq, 'people': packet['count'], 'reid': report['status'],
                               'gallery_sessions': report['gallery_sessions']}), flush=True)
             if seq >= args.frames:
@@ -64,6 +66,8 @@ def main():
                'quality_rejections': dict(rejected), 'max_people': max((r['people'] for r in rows), default=0),
                'max_gallery_sessions': max((r['reid']['gallery_sessions'] for r in rows), default=0),
                'applied_recoveries':sum(d['action']=='MATCH' for r in rows for d in r['reid']['decisions']),
+               'tracking_candidates':sum(r['tracking']['tracking_candidates'] for r in rows),
+               'matched_tracking_candidates':sum(r['tracking']['matched_tracking_candidates'] for r in rows),
                'wall_seconds': round(time.perf_counter()-started, 2),
                'validation': 'Real-model execution only; no labeled identity accuracy evaluation.', 'rows': rows}
     args.output.parent.mkdir(parents=True, exist_ok=True)

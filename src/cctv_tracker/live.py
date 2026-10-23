@@ -14,7 +14,7 @@ from uuid import uuid4
 from .config import Rules, Zone
 from .persistence import Database, now_us
 from .pipeline import Pipeline
-from .vision import Detection
+from .vision import frame_detections
 from .rtsp import RtspCapture, validate_rtsp_url
 from .webcam import MODEL_SHA256
 
@@ -252,7 +252,7 @@ class LiveController:
                             raise ValueError('Inferensi terlalu lambat; hasil tidak menjadi bukti')
                         if self.stop_event.is_set():
                             raise ValueError('Sesi telah berhenti; hasil inferensi diabaikan')
-                        accounting = account([Detection(tuple(d['box']), d['confidence']) for d in result['detections']], mono, frame_jpeg=item['jpeg'])
+                        accounting = account(frame_detections(result), mono, frame_jpeg=item['jpeg'])
                         last_valid = mono / 1e9; attempts = 0
                         result.update(accounting)
                         result.update(source=source, recorded=not preview_only, processed_monotonic_ns=time.perf_counter_ns())

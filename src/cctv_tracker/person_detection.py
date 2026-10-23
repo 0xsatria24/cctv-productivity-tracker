@@ -1,5 +1,5 @@
 """Image-quality and postprocessing policy shared by YOLOX runtimes."""
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import math
 
 
@@ -9,12 +9,15 @@ class DetectionTuning:
     nms_iou: float = 0.5
     detail: bool = False
     tile_overlap: float = 0.5
+    tracking_confidence: float = 0.1
 
     def __post_init__(self):
-        for key in ('confidence', 'nms_iou'):
+        for key in ('confidence', 'nms_iou', 'tracking_confidence'):
             value = getattr(self, key)
             if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not 0 < value < 1:
                 raise ValueError(f'{key} must be finite and between 0 and 1')
+        if not .1 <= self.tracking_confidence <= self.confidence:
+            raise ValueError('tracking_confidence must be in [0.1, confidence] for ByteTrack')
         if type(self.detail) is not bool:
             raise ValueError('detail must be boolean')
         if isinstance(self.tile_overlap, bool) or not isinstance(self.tile_overlap, (int, float)) or not math.isfinite(self.tile_overlap) or not 0.1 <= self.tile_overlap <= 0.5:
@@ -46,14 +49,15 @@ def preprocess_yolox(frame):
     return cv2.cvtColor(padded, cv2.COLOR_BGR2RGB).transpose(2, 0, 1)[None].astype(np.float32), scale
 
 
-def decode_people(predictions, grid, strides, scale, region, frame_size, tuning):
+def decode_people(predictions, grid, strides, scale, region, frame_size, tuning, *, include_tracking=False):
     import numpy as np
     predictions = np.asarray(predictions)
     if predictions.shape != (len(grid), 85):
         raise ValueError('Kontrak output YOLOX tidak sesuai')
     with np.errstate(over='ignore', invalid='ignore'):
         scores = predictions[:, 4] * predictions[:, 5]
-    valid = np.isfinite(predictions).all(axis=1) & np.isfinite(scores) & (scores >= tuning.confidence) & (predictions[:, 5:].argmax(axis=1) == 0)
+    threshold = tuning.tracking_confidence if include_tracking else tuning.confidence
+    valid = np.isfinite(predictions).all(axis=1) & np.isfinite(scores) & (scores >= threshold) & (predictions[:, 5:].argmax(axis=1) == 0)
     p, scores = predictions[valid], scores[valid]
     centers = (p[:, :2] + grid[valid]) * strides[valid]
     sizes = np.exp(np.clip(p[:, 2:4], -20, 20)) * strides[valid]
@@ -78,7 +82,7 @@ def decode_people(predictions, grid, strides, scale, region, frame_size, tuning)
     return boxes, scores[valid]
 
 
-def suppress_people(boxes, scores, frame_size, tuning, *, full_frame_count=None):
+def suppress_people(boxes, scores, frame_size, tuning, *, full_frame_count=None, round_scores=True):
     import cv2
     import numpy as np
     if not len(boxes):
@@ -103,5 +107,36 @@ def suppress_people(boxes, scores, frame_size, tuning, *, full_frame_count=None)
     xywh[:, 2:] -= xywh[:, :2]
     keep = cv2.dnn.NMSBoxes(xywh.tolist(), scores.tolist(), tuning.confidence, tuning.nms_iou)
     width, height = frame_size
-    return [{'box': (boxes[i] / [width, height, width, height]).tolist(), 'confidence': round(float(scores[i]), 3)}
+    return [{'box': (boxes[i] / [width, height, width, height]).tolist(),
+             'confidence': round(float(scores[i]), 3) if round_scores else float(scores[i])}
             for i in np.asarray(keep).reshape(-1)]
+
+
+def split_people(boxes, scores, frame_size, tuning, *, full_frame_count=0):
+    """Keep the public detector path unchanged; low candidates have a separate budget."""
+    import numpy as np
+    from .domain.geometry import overlap_ratio
+    boxes=np.asarray(boxes,dtype=float).reshape(-1,4)
+    scores=np.asarray(scores,dtype=np.float32)
+    public_mask=scores>=tuning.confidence
+    public=suppress_people(boxes[public_mask],scores[public_mask],frame_size,tuning,
+                           full_frame_count=int(public_mask[:full_frame_count].sum()) if tuning.detail else None)
+    low=(scores>=tuning.tracking_confidence)&~public_mask
+    indices=np.flatnonzero(low)
+    if len(indices)>1024:
+        indices=np.sort(indices[np.argsort(-scores[indices],kind='stable')[:1024]])
+    candidates=suppress_people(boxes[indices],scores[indices],frame_size,
+                               replace(tuning,confidence=tuning.tracking_confidence),
+                               full_frame_count=int((indices<full_frame_count).sum()) if tuning.detail else None,
+                               round_scores=False)
+    def separate(row):
+        box=row['box']
+        for accepted in public:
+            other=accepted['box']
+            polygon=((other[0],other[1]),(other[2],other[1]),(other[2],other[3]),(other[0],other[3]))
+            reverse=((box[0],box[1]),(box[2],box[1]),(box[2],box[3]),(box[0],box[3]))
+            if max(overlap_ratio(box,polygon),overlap_ratio(other,reverse))>=.6:
+                return False
+        return True
+    candidates=[row for row in sorted(candidates,key=lambda row:row['confidence'],reverse=True) if separate(row)]
+    return public,candidates[:128]

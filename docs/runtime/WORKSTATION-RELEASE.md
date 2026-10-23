@@ -26,6 +26,11 @@
 
 ## Measured limits
 
+Confidence routing has since been separated for YOLOX tracking. The paired
+60-second test reduced session starts from 67 to 56 while preserving every public
+detection and workstation snapshot. Workstation coverage remains 30%; this is
+not a detector-accuracy improvement. See [confidence paths](CONFIDENCE-PATHS.md).
+
 The first 60 seconds of `075831.mp4`, 301 samples at 5 FPS, YOLOX OpenVINO GPU
 and active retail-0287 ReID, produced 47 empty detection frames and 2 recoveries.
 An explicitly experimental front-area polygon accumulated **18 s occupied and

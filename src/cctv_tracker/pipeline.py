@@ -33,7 +33,8 @@ class Pipeline:
         self.last_sequence = None
         self.live_events = live_events
         self.confirmed = {}
-        self.sessions = SessionManager(settings)
+        self.sessions = SessionManager(settings, continuation_confidence=min(
+            settings.detection.tracking_confidence, settings.rules.strong_confidence))
         self.last_monotonic_ns = None
         self.last_generation = None
         self.clock_anchor = None
@@ -64,7 +65,8 @@ class Pipeline:
             mapped = {z.id: (State.UNKNOWN, None, unavailable) for z in self.settings.zones}
         else:
             tracked = self.tracker.update(detections, monotonic_ns / 1e9, scoped_generation)
-            mapped = associate(tracked, self.settings.zones, self.settings.rules, self.settings.position)
+            mapped = associate([d for d in tracked if not d.tracking_only], self.settings.zones,
+                               self.settings.rules, self.settings.position)
         bindings = self.sessions.update(tracked, utc_us, monotonic_ns, scoped_generation, unavailable,
                                         recover=self.settings.reid.mode != 'active')
         token = FrameToken(self.settings.camera_id, self.writer.run_id, scoped_generation,
@@ -113,6 +115,8 @@ class Pipeline:
         # Each overlay pairs a CURRENT measured box with that binding's timer.
         rows = []
         for detection, session in bindings:
+            if detection.tracking_only:
+                continue
             snapshot = session_snapshots[session.session_id] if session else None
             rows.append({**dataclass_detection(detection),
                          'position': measured_position(detection, self.settings.position) if self.settings.position.mode != 'bbox_overlap' else None,
@@ -123,10 +127,11 @@ class Pipeline:
                          'first_seen_utc_us': session.first_seen if session else None,
                          'last_seen_utc_us': session.last_seen if session else None,
                          'accumulated_duration_us': session.accumulated_ns // 1000 if session else 0,
+                         'evidence_state': 'MEASURED' if detection.confidence >= self.settings.rules.strong_confidence else 'WEAK',
                          'session_status': session.status if session else 'UNASSIGNED',
                          'workstation_times': [{'zone_id': alias, 'name': next(z.name for z in self.settings.zones if z.id == alias),
                                                 'presence_us': zone['presence_us']}
-                                               for alias, zone in (snapshot['zone_times'].items() if snapshot else ()) if zone['inside']]})
+                                               for alias, zone in (snapshot['zone_times'].items() if snapshot else ()) if zone['inside'] and session.last_observation_strong]})
         self.latest = {"run_id": self.writer.run_id, "committed_sequence": self.writer.seq,
                 'frame_seq': seq, 'generation_id': scoped_generation, 'mapping_version': self.sessions.mapping_version,
                 'frame_monotonic_ns': str(monotonic_ns), 'captured_utc_us': captured_utc_us,

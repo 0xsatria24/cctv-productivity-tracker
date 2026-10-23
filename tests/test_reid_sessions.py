@@ -124,7 +124,8 @@ def test_competitor_without_embedding_still_vetoes_motion_ambiguity(monkeypatch)
     # A competitor's poor crop does not remove its geometric identity risk.
     monkeypatch.setattr('cctv_tracker.reid.runtime.make_crops',
                         lambda *_: ([AppearanceSample(query.sample, None)], [{'detection_index': 1, 'reason': 'CROP_BLURRY'}]))
-    old = SimpleNamespace(session_id='old', status='LOST', recoverable=True, generation='gen', last_ns=1_000_000_000)
+    old = SimpleNamespace(session_id='old', status='LOST', recoverable=True, generation='gen',
+                          last_ns=1_000_000_000, last_strong_ns=1_000_000_000)
     first = SimpleNamespace(session_id='first', status='ACTIVE', first_ns=2_000_000_000)
     second = SimpleNamespace(session_id='second', status='ACTIVE', first_ns=2_000_000_000)
     manager = SimpleNamespace(rules=SessionRules(), dirty={}, sessions={'old': old, 'first': first, 'second': second},

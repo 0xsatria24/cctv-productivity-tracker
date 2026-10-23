@@ -27,7 +27,7 @@ def make_crops(jpeg, detections, token, rules):
         left, top = math.floor(x1*width), math.floor(y1*height)
         right, bottom = math.ceil(x2*width), math.ceil(y2*height)
         reason = None
-        if detection.confidence < rules.min_confidence:
+        if detection.tracking_only or detection.confidence < rules.min_confidence:
             reason = 'LOW_CONFIDENCE'
         elif right-left < rules.min_width or bottom-top < rules.min_height:
             reason = 'CROP_TOO_SMALL'
@@ -35,7 +35,7 @@ def make_crops(jpeg, detections, token, rules):
             reason = 'FRAME_EDGE'
         elif not 0.2 <= (right-left)/(bottom-top) <= 0.85:
             reason = 'PARTIAL_BODY_SHAPE'
-        elif any(overlap_fraction(detection.box, other.box) > rules.max_overlap for j, other in enumerate(detections) if j != index):
+        elif any(overlap_fraction(detection.box, other.box) > rules.max_overlap for j, other in enumerate(detections) if j != index and not other.tracking_only):
             reason = 'CROWD_OVERLAP'
         if reason:
             rejected.append({'detection_index': index, 'reason': reason})

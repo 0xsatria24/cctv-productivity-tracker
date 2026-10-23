@@ -9,7 +9,7 @@ from .config import Settings, Zone
 from .positioning import PositionCalibration
 from .workstations import WorkstationTimeline
 from .sessions import SessionManager
-from .vision import Detection, Tracker
+from .vision import Tracker, frame_detections
 from .reid.runtime import ReIdRuntime
 from .reid.types import FrameToken
 
@@ -162,10 +162,10 @@ class ReplayTracking:
                                          stream.settings.rules.max_evidence_gap_seconds,
                                          rules=stream.settings.tracking)
                 stream.sessions = SessionManager(stream.settings, continuation_confidence=min(
-                    stream.settings.detection.confidence, stream.settings.rules.strong_confidence))
+                    stream.settings.detection.tracking_confidence, stream.settings.rules.strong_confidence))
                 stream.reid = ReIdRuntime(stream.settings.reid, self.reid_extractor)
             result = detector.detect(jpeg)
-            detections = [Detection(tuple(row['box']), row['confidence']) for row in result['detections']]
+            detections = frame_detections(result)
             if frame.generation != stream.generation:
                 stream.sessions.finish()
                 stream.reid.clear()
@@ -183,6 +183,8 @@ class ReplayTracking:
             reid_report = stream.reid.commit(stage, set(stream.sessions.sessions))
             rows = []
             for detection, session in bindings:
+                if detection.tracking_only:
+                    continue
                 rows.append({'box': detection.box, 'confidence': detection.confidence,
                              'track_id': detection.track_id,
                              'session_id': session.session_id if session else None,
@@ -199,7 +201,7 @@ class ReplayTracking:
                         for session in stream.sessions.sessions.values()]
             if stream.workstations is None:
                 stream.workstations = WorkstationTimeline(stream.settings)
-            workstation_rows = stream.workstations.update(detections, frame)
+            workstation_rows = stream.workstations.update([d for d in detections if not d.tracking_only], frame)
             stream.sessions.checkpoint()
             stream.generation, stream.sequence, stream.media_time = frame.generation, frame.sequence, frame.media_time
             return {**result, 'detections': rows, 'count': len(rows), 'sessions': sessions,
@@ -208,6 +210,7 @@ class ReplayTracking:
                     'calibration_revision': stream.calibration_revision,
                     'reid': reid_report,
                     'session_metrics': dict(stream.sessions.metrics),
+                    'tracking': dict(stream.tracker.metrics),
                     'mapping_version': stream.sessions.mapping_version,
                     'replay_id': frame.replay_id, 'generation': frame.generation,
                     'frame_sequence': frame.sequence, 'media_time_seconds': frame.media_time,

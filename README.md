@@ -14,6 +14,10 @@ buka `http://localhost:5174/#/live`, pilih video, terapkan zona, aktifkan deteks
 preview, lalu putar. Seek atau perubahan zona memulai pengukuran replay baru.
 Target dan batas validasi rilis: [Workstation release](docs/runtime/WORKSTATION-RELEASE.md).
 
+YOLOX kini memisahkan [confidence tracking dan pencatatan](docs/runtime/CONFIDENCE-PATHS.md):
+kandidat 0,10 membantu asosiasi, deteksi publik tetap 0,45, dan kandidat lemah
+tidak menambah timer atau membuat sesi baru.
+
 Status: dashboard React sudah terhubung ke engine Python melalui API lokal dan SQLite. Satu server menyajikan UI dan API; replay dapat dimulai/dihentikan dari dashboard. Preview beberapa kamera tersedia dalam grid 1/4/9/16. Tracking, zona dan durasi live masih satu sumber aktif; native GUI, inferensi banyak kamera dan acceptance produksi belum selesai.
 
 Jalankan aplikasi terintegrasi di PowerShell dari folder proyek:

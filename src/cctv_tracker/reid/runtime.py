@@ -66,7 +66,8 @@ class ReIdRuntime:
                     continue
                 queries[session.session_id] = result
                 for old in lost:
-                    gap = session.first_ns-old.last_ns
+                    strong_at = old.last_strong_ns if old.last_strong_ns is not None else old.last_ns
+                    gap = session.first_ns-strong_at
                     if gap > self.rules.max_gap_seconds*1e9:
                         continue
                     if scorer(old, session, detection, token.monotonic_ns) is not None:
@@ -85,7 +86,7 @@ class ReIdRuntime:
             report['decisions'] = [asdict(d) for d in decisions]
             if self.rules.mode == 'active':
                 for decision in report['decisions']:
-                    decision['policy_revision'] = 'reid-active-'+self.rules.recovery_policy+'-v1'
+                    decision['policy_revision'] = 'reid-active-'+self.rules.recovery_policy+'-v2'
             report['status'] = 'ACTIVE' if self.rules.mode == 'active' else 'SHADOW'
             report['recovery_policy'] = self.rules.recovery_policy
             report['model'] = asdict(self.extractor.identity)
@@ -97,10 +98,11 @@ class ReIdRuntime:
 
     def _short_occlusion_score(self, old, candidate, detection, at):
         if (not old.recoverable or old.reason not in {'DETECTION_LOST', 'EVIDENCE_GAP'}
-                or detection.confidence < self.rules.min_confidence):
+                or detection.tracking_only or detection.confidence < self.rules.min_confidence):
             return None
-        gap = (candidate.first_ns-old.last_ns)/1e9
-        if gap <= 0 or gap > self.rules.max_gap_seconds or (at-old.last_ns)/1e9 > self.rules.max_gap_seconds+1:
+        strong_at = old.last_strong_ns if old.last_strong_ns is not None else old.last_ns
+        gap = (candidate.first_ns-strong_at)/1e9
+        if gap <= 0 or gap > self.rules.max_gap_seconds or (at-strong_at)/1e9 > self.rules.max_gap_seconds+1:
             return None
         box, current = old.box, candidate.box
         if box[0] <= .02 or max(box[2:]) >= .98:
