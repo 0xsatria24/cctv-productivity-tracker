@@ -5,7 +5,6 @@ import numpy as np
 import pytest
 from cctv_tracker.webcam import WebcamDetector, MODEL_PATH, MODEL_SHA256
 from cctv_tracker.openvino_yolox import OpenVinoYoloX
-from cctv_tracker.person_detection import DetectionTuning
 
 INSTALLED = importlib.util.find_spec('openvino') is not None and MODEL_PATH.exists()
 
@@ -64,15 +63,3 @@ def test_missing_requested_device_never_falls_back(monkeypatch):
     with pytest.raises(RuntimeError, match='GPU tidak tersedia'):
         detector._load_backend()
     assert detector.session is None
-
-
-@pytest.mark.skipif(not INSTALLED or not (MODEL_PATH.parent / 'person-test.png').exists(), reason='Optional public person sample')
-def test_detail_keeps_two_people_without_duplicate_body_parts(tmp_path):
-    image = cv2.imread(str(MODEL_PATH.parent / 'person-test.png'))
-    jpeg = cv2.imencode('.jpg', image)[1].tobytes()
-    detector = OpenVinoYoloX(cache_dir=tmp_path / 'cache', tuning=DetectionTuning(detail=True))
-    result = detector.detect(jpeg)
-    assert result['count'] == 2
-    assert result['model_passes'] == 5 and result['detection_profile'] == 'detail'
-    blank = detector.detect(cv2.imencode('.jpg', np.zeros((480, 640, 3), np.uint8))[1].tobytes())
-    assert blank['count'] == 0

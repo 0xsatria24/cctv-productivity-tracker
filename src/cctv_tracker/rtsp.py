@@ -5,7 +5,6 @@ import time
 from urllib.parse import urlsplit
 from uuid import uuid4
 from hashlib import sha256
-from .frame_image import capture_dimensions
 
 
 def validate_rtsp_url(value):
@@ -51,9 +50,7 @@ def capture_worker(url, mailbox, stop, open_timeout, read_timeout, capture_fps=2
         with av.open(url, format='rtsp', options={'rtsp_transport': 'tcp', 'fflags': 'nobuffer', 'flags': 'low_delay'}, timeout=(open_timeout, read_timeout)) as container:
             if not container.streams.video:
                 raise ValueError('No video')
-            codec = getattr(container.streams.video[0], 'codec_context', None)
-            if codec is not None:
-                codec.thread_count = native_threads
+            container.streams.video[0].codec_context.thread_count = native_threads
             previous_pts, sampled, decoded, encoded_count, corrupt_dropped = None, 0.0, 0, 0, 0
             for frame in container.decode(video=0):
                 if stop.is_set():
@@ -77,8 +74,7 @@ def capture_worker(url, mailbox, stop, open_timeout, read_timeout, capture_fps=2
                 encoded_count += 1
                 _latest(mailbox, {'jpeg': jpeg, 'monotonic_ns': captured, 'generation': generation,
                                  'capture_metrics':{'decoded':decoded,'sampled':encoded_count,'sample_skipped':decoded-encoded_count-corrupt_dropped,'corrupt_dropped':corrupt_dropped},
-                                 'source_pts_ns':round(float(frame.pts * frame.time_base)*1e9)
-                                                 if frame.pts is not None and frame.time_base else None})
+                                 'source_pts_ns':round(float(frame.time)*1e9) if frame.time is not None else None})
     except Exception:
         _latest(mailbox, {'error': 'RTSP tidak dapat dibaca; periksa jaringan, URL, kredensial dan codec'})
     finally:

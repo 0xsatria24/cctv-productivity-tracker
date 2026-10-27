@@ -33,7 +33,7 @@ def entitlement(count=2):
 def test_headless_cameras_share_one_model_instance(tmp_path,monkeypatch):
     import editions.headless.service as module
     created = []
-    def factory(*args, **kwargs):
+    def factory(*args):
         detector = SimpleNamespace(detect=lambda jpeg: {'detections':[]})
         created.append(detector)
         return detector
@@ -43,9 +43,7 @@ def test_headless_cameras_share_one_model_instance(tmp_path,monkeypatch):
         service.add('a','rtsp://localhost/a')
         service.add('b','rtsp://localhost/b')
         assert len(created) == 1
-        assert service.get('a').detector.scheduler is service.get('b').detector.scheduler
-        assert service.get('a').detector.source_id != service.get('b').detector.source_id
-        assert service.get('a').detector.scheduler.detector is created[0]
+        assert service.get('a').detector is service.get('b').detector
     finally:
         service.shutdown()
 
@@ -121,7 +119,7 @@ def test_multi_camera_uses_real_shared_accounting_with_synthetic_capture(tmp_pat
             return {'jpeg': b'synthetic', 'monotonic_ns': time.perf_counter_ns(), 'generation': 'fixture'}
         def close(self):
             pass
-    monkeypatch.setattr(module, 'create_detector', lambda *args, **kwargs: FixtureDetector())
+    monkeypatch.setattr(module, 'create_detector', lambda *args: FixtureDetector())
     monkeypatch.setattr(module, 'create_live_engine', lambda settings, detector: LiveController(settings, detector, capture_factory=Capture))
     service = EngineService(Settings(database=tmp_path / 'headless.sqlite3'), entitlement())
     with TestClient(create_app(service, TOKEN)) as client:

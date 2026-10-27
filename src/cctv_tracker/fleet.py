@@ -14,7 +14,7 @@ from .persistence import Database
 from .rtsp import RtspCapture, validate_rtsp_url, rtsp_camera_key
 from .secure_store import SecureStore
 
-from .inference import FairDetector, InferenceScheduler
+from .inference import FairDetector
 from .shared_capture import SharedPreviewCapture
 
 ACTIVE = {'STARTING', 'RUNNING', 'STOPPING'}
@@ -71,13 +71,12 @@ class CameraFleet(CameraWall):
                 raise LookupError('Kamera tidak ditemukan')
             return camera.record['url']
 
-    def __init__(self, settings, detector, *, capture_factory=RtspCapture, lease_seconds=12, scheduler=None):
+    def __init__(self, settings, detector, *, capture_factory=RtspCapture, lease_seconds=12):
         super().__init__(settings, capture_factory=capture_factory, lease_seconds=lease_seconds)
         self.root = settings.database.parent / (settings.database.stem + '-fleet')
         self.root.mkdir(parents=True, exist_ok=True)
         self.settings = replace(settings, database=self.root / 'fleet.sqlite3')
         self.detector = detector
-        self.scheduler = scheduler or (detector if isinstance(detector, InferenceScheduler) else None)
         self._lock = RLock()
         self._removing = set()
         self.store = SecureStore(self.root / 'cameras.protected')
@@ -105,8 +104,7 @@ class CameraFleet(CameraWall):
             raise ValueError('Too many cameras')
 
     def _construct(self, row):
-        detector = self.scheduler.bind('fleet:' + row['id'], max_fps=self.settings.inference_fps) if self.scheduler else self.detector
-        camera = ManagedCamera(row, self.settings, detector, self._wanted, self.capture_factory)
+        camera = ManagedCamera(row, self.settings, self.detector, self._wanted, self.capture_factory)
         self._cameras[camera.id] = camera
         camera.start()
         return camera
@@ -134,8 +132,7 @@ class CameraFleet(CameraWall):
             row = {'id': uuid4().hex, 'name': name, 'url': url, 'auto_resume': False, 'desired': False, 'archived': False}
             updated = copy.deepcopy(self.records)
             updated['cameras'].append(row)
-            detector = self.scheduler.bind('fleet:' + row['id'], max_fps=self.settings.inference_fps) if self.scheduler else self.detector
-            camera = ManagedCamera(row, self.settings, detector, self._wanted, self.capture_factory)
+            camera = ManagedCamera(row, self.settings, self.detector, self._wanted, self.capture_factory)
             self.store.save(updated)
             self.records = updated
             self._cameras[camera.id] = camera

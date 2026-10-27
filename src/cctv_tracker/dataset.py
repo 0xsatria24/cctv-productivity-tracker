@@ -216,8 +216,7 @@ def baseline(dataset, output, *, detector_kind='yolox-openvino', device='GPU', d
                 raise ValueError('Detector and exported image dimensions differ')
             # Retain weak measured candidates for offline threshold sweeps. They
             # remain proposals and never change the live display/accounting policy.
-            from .person_detection import detection_proposals
-            candidates = detection_proposals(prediction)
+            candidates = prediction.get('tracking_candidates',prediction['detections'])
             floor = detector.manifest.get('tracking_candidate_threshold',.45) if 'tracking_candidates' in prediction else detector.manifest.get('threshold',.45)
             result['frames'][key] = {'detections': prediction['detections'],'candidates':candidates,
                                      'candidate_floor':floor,'inference_ms': timings[-1]}

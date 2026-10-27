@@ -5,11 +5,6 @@ from zoneinfo import ZoneInfo
 import json
 import math
 import os
-from .person_detection import DetectionTuning
-from .tracking import TrackingRules
-from .positioning import PositionCalibration, position_calibration
-from .inference import SchedulingRules
-from .reid.config import ReIdRules
 
 
 def app_data() -> Path:
@@ -119,11 +114,6 @@ class Settings:
     rules: Rules = field(default_factory=Rules)
     zones: tuple[Zone, ...] = ()
     sessions: SessionRules = field(default_factory=SessionRules)
-    detection: DetectionTuning = field(default_factory=DetectionTuning)
-    tracking: TrackingRules = field(default_factory=TrackingRules)
-    position: PositionCalibration = field(default_factory=PositionCalibration)
-    scheduling: SchedulingRules = field(default_factory=SchedulingRules)
-    reid: ReIdRules = field(default_factory=ReIdRules)
 
     def __post_init__(self):
         ZoneInfo(self.timezone)
@@ -145,7 +135,6 @@ class Settings:
             raise ValueError("Timeouts must be positive and finite")
         if len({z.id for z in self.zones}) != len(self.zones):
             raise ValueError("Duplicate zone IDs")
-        self.position.validate_zones(self.zones)
         # Multiple CPUs can read WAL, but an active database must remain local.
         if str(self.database).startswith(("\\\\", "//")):
             raise ValueError("Database must be on a local disk")
@@ -161,13 +150,5 @@ def load_settings(path: Path) -> Settings:
         values["database"] = Path(values["database"]).expanduser().resolve()
     values["rules"] = Rules(**values.get("rules", {}))
     values["sessions"] = SessionRules(**values.get("sessions", {}))
-    values["detection"] = DetectionTuning(**values.get("detection", {}))
-    values["tracking"] = TrackingRules(**values.get("tracking", {}))
-    values["position"] = position_calibration(values.get("position"))
-    values["scheduling"] = SchedulingRules(**values.get("scheduling", {}))
-    values["reid"] = ReIdRules(**values.get("reid", {}))
-    if values['reid'].manifest_path:
-        from dataclasses import replace
-        values['reid'] = replace(values['reid'], manifest_path=str((path.parent / values['reid'].manifest_path).resolve()))
     values["zones"] = tuple(Zone(**{**z, "polygon": tuple(tuple(p) for p in z["polygon"])}) for z in values.get("zones", []))
     return Settings(**values)

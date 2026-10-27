@@ -1,5 +1,5 @@
 """Shared construction boundary for every product edition (no UI imports)."""
-def create_detector(kind='yolox', device='CPU', model_path=None, *, tuning=None):
+def create_detector(kind='yolox', device='CPU', model_path=None):
     from .webcam import WebcamDetector
     from .nanodet import NanoDetDetector
     from .openvino_yolox import OpenVinoYoloX
@@ -7,13 +7,6 @@ def create_detector(kind='yolox', device='CPU', model_path=None, *, tuning=None)
     if kind not in classes:
         raise ValueError('Detector tidak didukung')
     kwargs = {'model_path': model_path} if model_path else {}
-    if tuning is not None:
-        from .person_detection import DetectionTuning
-        if kind == 'nanodet':
-            if tuning != DetectionTuning():
-                raise ValueError('Pengaturan detection khusus hanya didukung YOLOX')
-        else:
-            kwargs['tuning'] = tuning
     if kind == 'yolox-openvino':
         kwargs['device'] = device
     return classes[kind](**kwargs)

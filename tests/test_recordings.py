@@ -126,7 +126,7 @@ def test_recording_api_auth_policy_persistence_and_file_allowlist(tmp_path, monk
     from cctv_tracker.api import create_app
     import cctv_tracker.engine as module
     detector = FixtureDetector(); detector.runtime_label = 'SYNTHETIC'; detector.session = True; detector.manifest = {}
-    monkeypatch.setattr(module, 'create_detector', lambda *args, **kwargs: detector)
+    monkeypatch.setattr(module, 'create_detector', lambda *args: detector)
     settings = Settings(database=tmp_path / 'app.sqlite3')
     with closing(Database(settings.database)):
         pass

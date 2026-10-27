@@ -81,7 +81,7 @@ def test_baseline_warms_selected_images_and_stores_candidates_separately(tmp_pat
     calls=[]
     def detect(image):
         calls.append(image)
-        return {'width':800,'height':400,'detections':[],
+        return {'width':640,'height':320,'detections':[],
                 'tracking_candidates':[{'box':[.1,.1,.4,.8],'confidence':.2}]}
     fake=SimpleNamespace(manifest={'tracking_candidate_threshold':.1,'threshold':.45},sha='f'*64,detect=detect)
     result=baseline(data,tmp_path/'prediction.json',detector=fake,labels=labels,reviewed_only=True,warmup=2)

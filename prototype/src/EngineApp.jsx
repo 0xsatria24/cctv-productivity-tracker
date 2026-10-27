@@ -15,8 +15,6 @@ import { RecordingDestination } from './recording-destination';
 import { RecordingSettings, recordingLabel, useRecordings } from './recording-settings';
 import { MaintenancePanel } from './maintenance-panel';
 import { ManagedCameraControls } from './managed-camera';
-import { SettingsTools } from './settings-tools';
-import { VideoReplayWorkspace } from './video-replay';
 
 const sections=[['overview','Ringkasan',LayoutDashboard],['live','Pemantauan Live',Video],['workspaces','Workstation',ScanLine],['analytics','Laporan',ChartNoAxesCombined],['settings','Pengaturan',Settings]];
 const pageFromHash=()=>readRoute(window.location.hash).page;
@@ -111,7 +109,6 @@ function EngineModal({modal,onClose,engine}){
 export default function EngineApp(){
   const baseEngine=useEngine(),recordings=useRecordings(),engine={...baseEngine,recordings},[page,setPage]=useState(pageFromHash),[modal,setModal]=useState(null),[cameraHealth,setCameraHealth]=useState([]),[setupOpen,setSetupOpen]=useState(true),[analyticsTab,setAnalyticsTab]=useState(()=>readRoute(window.location.hash).tab);
   const [selectedCamera,setSelectedCamera]=useState('webcam'),[addRequest,setAddRequest]=useState(0);
-  const [areaRequest,setAreaRequest]=useState(0);
   const synchronizedSession=useRef(null);
   const webcam=useWebcamPreview();
   const live=useLiveEngine(webcam,engine);
@@ -141,10 +138,9 @@ export default function EngineApp(){
       </header>
       {engine.connectionError && <div className="system-warning" role="alert">Layanan monitoring tidak terhubung: {engine.connectionError} Data terakhir tetap tersimpan. Periksa koneksi aplikasi lalu perbarui status. Preview webcam dapat tetap digunakan.</div>}
       {live.active && <div className="operations-monitoring-ribbon" role="status"><span>{monitoringText(live.state,live.error||(Date.now()-live.receivedAt>4000?'stale':''))} · {live.state.source==='WEBCAM_LIVE'?'Webcam lokal':'Kamera RTSP'}</span><Button onClick={()=>navigate('live')}>Buka kamera aktif</Button></div>}
-      <main id="main-content"><VideoReplayWorkspace visible={page==='live'} engineAvailable={Boolean(engine.snapshot&&!engine.connectionError)}/>
-        <details className={`camera-session-controls live-engine-section ${page==='live'?'':'webcam-hidden'}`} open={setupOpen} onToggle={e=>setSetupOpen(e.currentTarget.open)}><summary>Setup dan monitoring <span>{managedCamera?managedCamera.name:monitoringText(live.state,live.error)}</span></summary>{managedCamera?<ManagedCameraControls key={managedCamera.id} areaRequest={areaRequest} camera={managedCamera} engine={engine}/>:<LiveEnginePanel areaRequest={areaRequest} cameras={cameraHealth} selected={selectedCamera} onSelect={setSelectedCamera} onAdd={()=>setAddRequest(v=>v+1)} onReports={()=>{engine.setDataset('live');engine.setCameraId('');navigate('reports');}} hidePreview live={live} webcam={webcam} engine={engine}/>}</details>
-        <CameraWorkspace selected={selectedCamera} onSelect={setSelectedCamera} onConfigure={(camera,editArea=false)=>{setSelectedCamera(camera.id);openSetup();if(editArea)setAreaRequest(v=>v+1);}} addRequest={addRequest} onHealthChange={setCameraHealth} page={page} engine={engine} live={live} webcam={{...webcam,liveSession:live.webcamSession,engineStarting:live.webcamStarting,inferencePaused:live.active&&live.state?.source==='RTSP_LIVE',analysisMode:live.state?.analysis_mode,calibration:live.state?.calibrations?.WEBCAM_LIVE?.camera_key===live.cameraKey?live.state.calibrations.WEBCAM_LIVE:null,
-          workstationFps:live.state?.workstation_policy?.sample_fps,workstations:live.state?.source==='WEBCAM_LIVE'?live.state?.workstations||[]:[],aruco:live.state?.source==='WEBCAM_LIVE'?live.state?.latest?.aruco:null,onCalibrate:()=>{setSelectedCamera('webcam');openSetup();setAreaRequest(v=>v+1);}}}/>
+      <main id="main-content">
+        <details className={`camera-session-controls live-engine-section ${page==='live'?'':'webcam-hidden'}`} open={setupOpen} onToggle={e=>setSetupOpen(e.currentTarget.open)}><summary>Setup dan monitoring <span>{managedCamera?managedCamera.name:monitoringText(live.state,live.error)}</span></summary>{managedCamera?<ManagedCameraControls key={managedCamera.id} camera={managedCamera} engine={engine}/>:<LiveEnginePanel cameras={cameraHealth} selected={selectedCamera} onSelect={setSelectedCamera} onAdd={()=>setAddRequest(v=>v+1)} onReports={()=>{engine.setDataset('live');engine.setCameraId('');navigate('reports');}} hidePreview live={live} webcam={webcam} engine={engine}/>}</details>
+        <CameraWorkspace selected={selectedCamera} onSelect={setSelectedCamera} onConfigure={camera=>{setSelectedCamera(camera.id);openSetup();}} addRequest={addRequest} onHealthChange={setCameraHealth} page={page} engine={engine} live={live} webcam={{...webcam,liveSession:live.webcamSession,engineStarting:live.webcamStarting,inferencePaused:live.active&&live.state?.source==='RTSP_LIVE',calibration:live.state?.calibrations?.WEBCAM_LIVE}}/>
         {engine.loading ? <Empty title="Menghubungkan layanan monitoring" description="Menunggu status kamera dan catatan tersimpan. Model dapat memerlukan waktu saat aplikasi baru dimulai."/>
           : !engine.snapshot ? <Empty title="Engine belum dapat dibaca" description="Refresh koneksi atau muat ulang halaman setelah engine berjalan." action={<Button onClick={engine.reload}>Coba lagi</Button>}/>
           : <>
@@ -154,7 +150,7 @@ export default function EngineApp(){
                 {page==='overview' && <OperationalOverview engine={engine} live={live} cameras={cameraHealth} navigate={navigate} onSetup={openSetup} onTimeline={openTimeline} setModal={setModal}/>}
                 {page==='workspaces' && <Workstations engine={engine} setModal={setModal} onSetup={openSetup}/>}
                 {page==='analytics' && <Analytics engine={engine} setModal={setModal} tab={analyticsTab} setTab={reportTab}/>}
-                {page==='settings' && <><EngineSettings engine={engine}/><SettingsTools engine={engine}/><details className="operations-diagnostics"><summary>Simulasi dan diagnostik observasi</summary><ReportSource engine={engine}/><Live engine={engine} setModal={setModal}/></details></>}
+                {page==='settings' && <><EngineSettings engine={engine}/><details className="operations-diagnostics"><summary>Simulasi dan diagnostik observasi</summary><ReportSource engine={engine}/><Live engine={engine} setModal={setModal}/></details></>}
               </>}
           </>}
       </main>

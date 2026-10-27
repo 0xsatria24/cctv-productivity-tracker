@@ -1,4 +1,4 @@
-export const ANCHOR = Date.now();
+export const ANCHOR = Date.parse('2026-10-12T10:42:00+07:00');
 export const DAY = 86_400_000;
 export const MINUTE = 60_000;
 export const LABELS = { OCCUPIED: 'Terisi', EMPTY: 'Kosong', UNKNOWN: 'Tidak diketahui' };

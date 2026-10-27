@@ -1,127 +1,176 @@
-"""Offline metrics against independent, complete labels on the sampled frames."""
+"""Duration-weighted occupancy evaluation against human annotations."""
+import argparse
+from contextlib import closing
+import json
 import math
+from pathlib import Path
+import time
 
-from .occupancy_evaluation import evaluate, main, replay_video, validate_annotations
-
-
-def iou(a, b):
-    intersection = max(0, min(a[2],b[2])-max(a[0],b[0])) * max(0, min(a[3],b[3])-max(a[1],b[1]))
-    union = (a[2]-a[0])*(a[3]-a[1]) + (b[2]-b[0])*(b[3]-b[1]) - intersection
-    return intersection/union if union > 0 else 0
+from .secure_store import atomic_write
 
 
-def match_boxes(truth, predicted, threshold=.5):
-    candidates = [sorted((j for j,p in enumerate(predicted) if iou(t['box'],p['box'])>=threshold),
-                         key=lambda j:iou(t['box'],predicted[j]['box']), reverse=True) for t in truth]
-    owners = {}
+def validate_annotations(value):
+    if value.get('version') != 1 or not value.get('zones'):
+        raise ValueError('Annotations require version 1 and at least one zone')
+    from .config import Zone
+    ids = set()
+    for zone in value['zones']:
+        Zone(zone['id'], zone['name'], tuple(tuple(p) for p in zone['polygon']))
+        if zone['id'] in ids:
+            raise ValueError('Duplicate annotated zone')
+        ids.add(zone['id'])
+        previous = 0
+        if not zone.get('intervals'):
+            raise ValueError('Each zone needs human-labeled intervals')
+        for row in zone['intervals']:
+            start, end = row['start_seconds'], row['end_seconds']
+            if not all(type(v) in (int, float) and math.isfinite(v) for v in (start, end)) or start < previous or end <= start or row['state'] not in {'OCCUPIED', 'EMPTY', 'UNKNOWN'}:
+                raise ValueError('Annotation intervals must be ordered, nonoverlapping and positive')
+            previous = end
+    return value
 
-    def assign(index, visited):
-        for j in candidates[index]:
-            if j in visited:
+
+def evaluate(truth, predictions, minimum_coverage):
+    validate_annotations(truth)
+    if not math.isfinite(minimum_coverage) or not 0 < minimum_coverage <= 1:
+        raise ValueError('Set the pilot minimum coverage explicitly (0, 1]')
+    matrix = {a: {b: 0.0 for b in ('OCCUPIED', 'EMPTY', 'UNKNOWN')} for a in ('OCCUPIED', 'EMPTY')}
+    per_zone = []
+    for zone in truth['zones']:
+        predicted = sorted(predictions.get(zone['id'], []), key=lambda p: p['start_seconds'])
+        previous = 0
+        for row in predicted:
+            if any(type(row[k]) not in (int,float) or not math.isfinite(row[k]) for k in ('start_seconds','end_seconds')) or row['start_seconds'] < previous or row['end_seconds'] <= row['start_seconds'] or row['state'] not in {'OCCUPIED', 'EMPTY', 'UNKNOWN'}:
+                raise ValueError('Predicted intervals overlap or are invalid')
+            previous = row['end_seconds']
+        valid, total = 0.0, 0.0
+        for expected in zone['intervals']:
+            if expected['state'] == 'UNKNOWN':
                 continue
-            visited.add(j)
-            if j not in owners or assign(owners[j],visited):
-                owners[j]=index
-                return True
-        return False
+            left, end = expected['start_seconds'], expected['end_seconds']
+            total += end - left
+            for observed in predicted:
+                a, b = max(left, observed['start_seconds']), min(end, observed['end_seconds'])
+                if b <= a:
+                    continue
+                if a > left:
+                    matrix[expected['state']]['UNKNOWN'] += a - left
+                matrix[expected['state']][observed['state']] += b - a
+                if observed['state'] != 'UNKNOWN':
+                    valid += b - a
+                left = b
+            if left < end:
+                matrix[expected['state']]['UNKNOWN'] += end - left
+        per_zone.append({'zone_id': zone['id'], 'eligible_seconds': total, 'observed_seconds': valid, 'coverage': valid / total if total else None})
+    total = sum(sum(row.values()) for row in matrix.values())
+    unknown = sum(row['UNKNOWN'] for row in matrix.values())
+    coverage = (total - unknown) / total if total else None
+    metrics = {}
+    for state in matrix:
+        other = 'EMPTY' if state == 'OCCUPIED' else 'OCCUPIED'
+        tp, fp, fn = matrix[state][state], matrix[other][state], matrix[state][other]
+        metrics[state] = {'precision_valid': tp / (tp + fp) if tp + fp else None,
+                          'recall_valid': tp / (tp + fn) if tp + fn else None,
+                          'recall_including_unknown': tp / sum(matrix[state].values()) if sum(matrix[state].values()) else None}
+    passed = coverage is not None and coverage >= minimum_coverage and all(m[k] is not None and m[k] >= .9 for m in metrics.values() for k in ('precision_valid', 'recall_valid'))
+    return {'basis': 'annotated workstation-seconds', 'confusion_seconds': matrix, 'coverage': coverage,
+            'unknown_seconds': unknown, 'per_zone': per_zone, 'classes': metrics,
+            'gate': {'precision_recall_minimum': .9, 'coverage_minimum': minimum_coverage, 'passed': passed}}
 
-    for index in range(len(truth)):
-        assign(index,set())
-    return [(i,j) for j,i in owners.items()]
+
+def replay_video(video, annotations, output, *, detector_kind='yolox-openvino', device='GPU', minimum_coverage):
+    import av
+    from .frame_image import encode_frame
+    from .config import Settings, Zone, Rules
+    from .engine import create_detector
+    from .persistence import Database
+    from .pipeline import Pipeline
+    from .vision import Detection
+    truth = validate_annotations(json.loads(Path(annotations).read_text(encoding='utf-8')))
+    output = Path(output).resolve()
+    output.mkdir(parents=True, exist_ok=False)  # Never overwrite a previous evaluation.
+    zones = tuple(Zone(z['id'], z['name'], tuple(tuple(p) for p in z['polygon'])) for z in truth['zones'])
+    rules = Rules(**truth.get('rules', {'max_evidence_gap_seconds': 1}))
+    settings = Settings(database=output / 'evaluation.sqlite3', zones=zones, rules=rules)
+    detector = create_detector(detector_kind, device)
+    anchor, pipeline, frames, times = 1_800_000_000_000_000, None, 0, []
+    first_time, last_time, sampled = None, None, -math.inf
+    corrupt_dropped, duplicates_dropped, sequence = 0, 0, 0
+    last_evidence = None
+    try:
+        with closing(Database(settings.database)) as db, av.open(str(video)) as source:
+            for frame in source.decode(video=0):
+                if frame.time is None:
+                    raise ValueError('Video needs reliable presentation timestamps')
+                first_time = frame.time if first_time is None else first_time
+                elapsed = frame.time - first_time
+                if last_time is not None and elapsed < last_time:
+                    raise ValueError('Video timestamps are not monotonic')
+                duplicate = last_time == elapsed
+                last_time = elapsed
+                if frame.is_corrupt:
+                    corrupt_dropped += 1
+                    continue
+                if duplicate:
+                    duplicates_dropped += 1
+                    continue
+                if elapsed - sampled + 1e-9 < 1 / settings.inference_fps:
+                    continue
+                sampled = elapsed
+                jpeg, _, _ = encode_frame(frame)
+                before = time.perf_counter()
+                result = detector.detect(jpeg)
+                times.append((time.perf_counter() - before) * 1000)
+                if pipeline is None:
+                    pipeline = Pipeline(settings, db, anchor, 'ANNOTATED_VIDEO_REPLAY', detector.sha, detector.manifest)
+                frames += 1
+                sequence += 1
+                candidates = result.get('tracking_candidates',result['detections'])
+                pipeline.feed([Detection(tuple(d['box']), d['confidence']) for d in candidates], anchor + round(elapsed * 1e6), round(elapsed * 1e9), sequence, 'video-1')
+                last_evidence = elapsed
+            if not frames:
+                raise ValueError('Video contains no evaluable frames')
+            if max(r['end_seconds'] for z in truth['zones'] for r in z['intervals']) > last_time:
+                raise ValueError('Annotations extend beyond the last video timestamp')
+            if last_time > last_evidence:
+                # The unmeasured tail remains UNKNOWN, never backfilled with presence.
+                pipeline.feed([],anchor+round(last_time*1e6),round(last_time*1e9),sequence+1,'video-1','EVALUATION_END_GAP')
+            pipeline.finish('COMPLETED'); pipeline = None
+            predictions = {}
+            for zone in zones:
+                # Resolve through the stored name/config rather than assuming ID construction.
+                found = db.conn.execute('SELECT id FROM workspaces WHERE name=?', (zone.name,)).fetchall()
+                if len(found) != 1:
+                    raise ValueError('Zone names must be unique for evaluation')
+                workspace = found[0][0]
+                predictions[zone.id] = [{'start_seconds': (r['start_utc_us'] - anchor) / 1e6,
+                                        'end_seconds': (r['evidence_until_utc_us'] - anchor) / 1e6, 'state': r['state']}
+                                       for r in db.conn.execute('SELECT * FROM zone_intervals WHERE workspace_id=? AND evidence_until_utc_us>start_utc_us ORDER BY start_utc_us', (workspace,))]
+            result = evaluate(truth, predictions, minimum_coverage)
+        import statistics
+        result.update(source='USER_VIDEO_REPLAY', annotation_source=truth.get('annotation_source', 'user-provided, review required'), frames=frames, video_seconds=last_time,
+                      inference_ms_p50=statistics.median(times), inference_ms_p95=sorted(times)[math.ceil(len(times)*.95)-1], model=dict(detector.manifest),
+                      corrupt_frames_dropped=corrupt_dropped,duplicate_pts_dropped=duplicates_dropped,
+                      image_pipeline='shared live capture JPEG transform', wall_clock_capacity_validated=False)
+        atomic_write(output / 'predictions.json', json.dumps(predictions, indent=2).encode())
+        atomic_write(output / 'result.json', json.dumps(result, indent=2).encode())
+        return result
+    finally:
+        if pipeline:
+            pipeline.lease.close()
 
 
-def _box_valid(box):
-    return (isinstance(box,(list,tuple)) and len(box)==4
-            and all(type(v) in (int,float) and math.isfinite(v) and 0<=v<=1 for v in box)
-            and box[0]<box[2] and box[1]<box[3])
-
-
-def evaluate_replay(labels, rows, *, minimum_seconds=1800):
-    frames=labels.get('frames',[])
-    if labels.get('schema_version')!=1 or not isinstance(labels.get('reviewer'),str) or not labels['reviewer'].strip() or not frames:
-        raise ValueError('Independent labels require schema_version=1, reviewer, and nonempty frames')
-    if len(frames)!=len(rows):
-        raise ValueError('Labels must cover every result frame in the evaluation window')
-    tp=fp=fn=switches=assigned=0
-    owners, last_ids, durations, prior = {}, {}, {}, None
-    first_time=None
-    for truth,predicted in zip(frames,rows):
-        at=truth.get('time')
-        if type(at) not in (int,float) or not math.isfinite(at) or at<0 or abs(at-predicted['time'])>1e-6 or (prior and at<=prior[0]):
-            raise ValueError('Label/result media times must match and advance')
-        if first_time is None:
-            first_time=at
-        people=truth.get('people')
-        measured=predicted.get('detections',[])
-        if not isinstance(people,list) or len(people)>100 or len(measured)>100:
-            raise ValueError('Every labeled frame requires a bounded, complete people list')
-        if any(not _box_valid(p.get('box')) or not isinstance(p.get('person_id'),str) or not p['person_id'] for p in people):
-            raise ValueError('Every person label requires a normalized box and independent person_id')
-        if len({p['person_id'] for p in people})!=len(people) or any(not _box_valid(p.get('box')) for p in measured):
-            raise ValueError('Duplicate identities or invalid predicted boxes')
-        matched=match_boxes(people,measured)
-        tp+=len(matched);fp+=len(measured)-len(matched);fn+=len(people)-len(matched)
-        for i,j in matched:
-            identity,sid=people[i]['person_id'],measured[j].get('session_id')
-            if not sid:
-                continue
-            assigned+=1
-            owners.setdefault(sid,set()).add(identity)
-            if identity in last_ids and last_ids[identity]!=sid:
-                switches+=1
-            last_ids[identity]=sid
-        zones=truth.get('zones',{})
-        clocks={z['zone_id']:z for z in predicted.get('workstations',[])}
-        if not zones or set(zones)!=set(clocks) or any(s not in ('OCCUPIED','EMPTY','UNKNOWN') for s in zones.values()):
-            raise ValueError('Each frame must label every calibrated workstation state')
-        if any(type(z.get(name)) is not int or z[name]<0 for z in clocks.values() for name in ('occupied_us','empty_us','unknown_us')):
-            raise ValueError('Workstation totals must be nonnegative integer microseconds')
-        if prior:
-            elapsed=round((at-prior[0])*1e6)
-            for zone,state in zones.items():
-                metric=durations.setdefault(zone,{'reference_occupied_us':0,'predicted_occupied_us':0,
-                                                   'absolute_interval_error_us':0,'known_reference_us':0,'unknown_prediction_us':0})
-                if set(zones)!=set(prior[1]) or set(clocks)!=set(prior[2]):
-                    raise ValueError('Calibration changed during evaluation')
-                for name in ('occupied_us','empty_us','unknown_us'):
-                    value=clocks[zone].get(name)
-                    if type(value) is not int or value<prior[2][zone][name]:
-                        raise ValueError('Workstation totals reset or are invalid during evaluation')
-                accounted=sum(clocks[zone][key]-prior[2][zone][key] for key in ('occupied_us','empty_us','unknown_us'))
-                if abs(accounted-elapsed)>2:
-                    raise ValueError('Workstation totals do not partition elapsed media time')
-                if elapsed<=1_000_000 and state==prior[1][zone] and state!='UNKNOWN':
-                    reference=elapsed if state=='OCCUPIED' else 0
-                    estimate=clocks[zone]['occupied_us']-prior[2][zone]['occupied_us']
-                    unknown=clocks[zone]['unknown_us']-prior[2][zone]['unknown_us']
-                    metric['reference_occupied_us']+=reference
-                    metric['predicted_occupied_us']+=estimate
-                    metric['known_reference_us']+=elapsed
-                    metric['unknown_prediction_us']+=unknown
-                    metric['absolute_interval_error_us']+=abs(estimate-reference)
-        prior=(at,zones,clocks)
-    precision=tp/(tp+fp) if tp+fp else None
-    recall=tp/(tp+fn) if tp+fn else None
-    false_merges=sum(len(ids)>1 for ids in owners.values())
-    identity_coverage=assigned/tp if tp else None
-    for metric in durations.values():
-        known=metric['known_reference_us']
-        metric['duration_error_ratio']=metric['absolute_interval_error_us']/known if known else None
-        metric['coverage']=1-metric['unknown_prediction_us']/known if known else None
-    evaluated_seconds=frames[-1]['time']-first_time
-    gates={'minimum_labeled_duration':evaluated_seconds>=minimum_seconds,
-           'precision_at_least_90_percent':precision is not None and precision>=.9,
-           'recall_at_least_90_percent':recall is not None and recall>=.9,
-           'no_observed_false_merges':false_merges==0 and bool(owners),
-           'identity_assignment_coverage_at_least_95_percent':identity_coverage is not None and identity_coverage>=.95,
-           'zone_duration_error_at_most_5_percent':bool(durations) and all(m['duration_error_ratio'] is not None and m['duration_error_ratio']<=.05 for m in durations.values()),
-           'zone_coverage_at_least_95_percent':bool(durations) and all(m['coverage'] is not None and m['coverage']>=.95 for m in durations.values())}
-    return {'basis':'independent_frame_labels','reviewer':labels['reviewer'], 'frames':len(frames),
-            'evaluated_seconds':evaluated_seconds,'iou_threshold':.5,'true_positive':tp,'false_positive':fp,
-            'false_negative':fn,'precision':precision,'recall':recall,'session_id_switches':switches,
-            'identity_assignment_coverage':identity_coverage,
-            'sessions_with_multiple_labeled_people':false_merges,'workstations':durations,
-            'proposed_acceptance_gates':gates,'labeled_clip_passed':all(gates.values()),'production_ready':False}
+def main():
+    parser = argparse.ArgumentParser(description='Evaluate a local CCTV recording against human zone/state annotations')
+    parser.add_argument('--video', required=True, type=Path)
+    parser.add_argument('--annotations', required=True, type=Path)
+    parser.add_argument('--output', required=True, type=Path)
+    parser.add_argument('--min-coverage', required=True, type=float)
+    parser.add_argument('--detector', choices=['yolox', 'yolox-openvino'], default='yolox-openvino')
+    parser.add_argument('--device', choices=['CPU', 'GPU'], default='GPU')
+    args = parser.parse_args()
+    result = replay_video(args.video, args.annotations, args.output, detector_kind=args.detector, device=args.device, minimum_coverage=args.min_coverage)
+    print(json.dumps(result, indent=2))
 
 
 if __name__ == '__main__':

@@ -37,7 +37,7 @@ def main():
             self.closed=True
     original = fleet_module.CameraFleet
     fleet_module.CameraFleet = lambda settings, detector: original(settings,detector,capture_factory=Capture)
-    engine.create_detector = lambda *args, **kwargs: Detector()
+    engine.create_detector = lambda *args: Detector()
     root = Path(__file__).resolve().parents[1]
     settings = Settings(database=root/'runtime/fleet-browser-fixture.sqlite3')
     with closing(Database(settings.database)):

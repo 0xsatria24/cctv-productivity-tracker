@@ -1,8 +1,6 @@
 from dataclasses import dataclass, replace
 from enum import StrEnum
 
-EVIDENCE_POLICY_REVISION = 'last-supporting-sample-v2'
-
 
 class State(StrEnum):
     OCCUPIED = "OCCUPIED"
@@ -77,9 +75,6 @@ class ZoneAccumulator:
             self.current = replace(self.current, until=obs.utc_us, reason=reason)
             self.candidate = None
         else:
-            if self.current.state != State.UNKNOWN and self.current.state != obs.evidence:
-                # Contradictory evidence ends the prior state at its last supporting sample.
-                self._transition(self.current.until, State.UNKNOWN, None, 'PENDING_CONFIRMATION')
             self.current = replace(self.current, until=obs.utc_us)
         if obs.evidence != State.UNKNOWN:
             if self.current.state == obs.evidence:

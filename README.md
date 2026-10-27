@@ -8,20 +8,6 @@ Durasi di box memakai usia track anonim agar tidak hilang saat confidence zona t
 
 Edisi tambahan **CCTV Headless Engine** tersedia tanpa frontend, dengan API multi-kamera, WebSocket, webhook, dan lisensi offline bertanda tangan. Panduan instalasi, konfigurasi, kontrak API, serta batas validasi: [Headless Engine](docs/runtime/HEADLESS.md). Jalankan `python -m editions.headless --help`; paket Enterprise dan Headless dibuat terpisah dengan `python scripts/build_editions.py`. Kedua edisi menggunakan engine yang sama.
 
-Headless, live dashboard, dan replay memakai [penjadwalan inference per sumber](docs/runtime/INFERENCE-SCHEDULING.md) agar giliran model dan antreannya terbatas. Batas FPS tetap bergantung kapasitas perangkat.
-
-Replay kini menyediakan **Kalibrasi zona** dan total **durasi workstation** yang
-terpisah dari ID orang. Total terisi tetap tersimpan saat sesi orang berganti;
-waktu tanpa bukti dicatat terpisah sebagai tidak pasti. Sesi orang/ReID berada
-di detail eksperimental. Jalankan `npm.cmd --prefix prototype run dev:reid`,
-buka `http://localhost:5174/#/live`, pilih video, terapkan zona, aktifkan deteksi
-preview, lalu putar. Seek atau perubahan zona memulai pengukuran replay baru.
-Target dan batas validasi rilis: [Workstation release](docs/runtime/WORKSTATION-RELEASE.md).
-
-YOLOX kini memisahkan [confidence tracking dan pencatatan](docs/runtime/CONFIDENCE-PATHS.md):
-kandidat 0,10 membantu asosiasi, deteksi publik tetap 0,45, dan kandidat lemah
-tidak menambah timer atau membuat sesi baru.
-
 Status: dashboard React sudah terhubung ke engine Python melalui API lokal dan SQLite. Satu server menyajikan UI dan API; replay dapat dimulai/dihentikan dari dashboard. Preview beberapa kamera tersedia dalam grid 1/4/9/16. Kamera RTSP terkelola mendukung analisis bersamaan dengan kalibrasi, histori dan laporan terpisah per kamera. Konfigurasi terenkripsi, pemulihan otomatis, serta backup/restore tersedia. Validasi produksi, uji 24 jam dan instalasi Windows Service pada mesin target belum selesai. Lihat [pilot hardening](docs/runtime/PILOT-HARDENING.md).
 
 Jalankan aplikasi terintegrasi di PowerShell dari folder proyek:
@@ -49,7 +35,6 @@ Set-Location -LiteralPath 'C:\Users\muham\OneDrive\Documents\ChatGPT\cctv 2'
 |---|---|
 | [PRD](PRD-CCTV-Productivity-Tracker.md) | Scope produk, metrik, rilis dan acceptance criteria |
 | [Architecture](docs/ARCHITECTURE.md) | Topologi proses, boundary modul, resource ownership |
-| [Person ReID](docs/runtime/REID.md) | Off/shadow/active, recovery sesi, audit transaksi dan batas validasi |
 | [Technical Design](docs/TECHNICAL-DESIGN.md) | Frame pipeline, temporal rules, events, recovery dan runtime |
 | [Database Design](docs/DATABASE-DESIGN.md) | ERD, source/projection/cache, transaksi dan retention |
 | [API Design](docs/API-DESIGN.md) | Local HTTP/WebSocket contract dan concurrency |

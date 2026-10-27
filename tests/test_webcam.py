@@ -31,9 +31,8 @@ def test_detector_retains_weak_candidates_without_promoting_them_to_raw_people()
     detector._infer = lambda blob: output
     result = detector.detect(jpeg(640, 360))
     assert result['count'] == 1
-    assert len(result['tracking_candidates']) == 1
-    assert result['detections'][0]['confidence'] == pytest.approx(.9)
-    assert result['tracking_candidates'][0]['confidence'] == pytest.approx(.2)
+    assert len(result['tracking_candidates']) == 2
+    assert [d['confidence'] for d in result['tracking_candidates']] == [.9, .2]
 
 
 def test_frame_endpoint_auth_validation_and_ephemeral_result(tmp_path, monkeypatch):
@@ -53,23 +52,6 @@ def test_frame_endpoint_auth_validation_and_ephemeral_result(tmp_path, monkeypat
     assert not (tmp_path / 'unused.sqlite3').exists()
 
 
-def test_replay_detection_is_authenticated_and_never_uses_live_accounting(tmp_path, monkeypatch):
-    monkeypatch.setattr(WebcamDetector, 'detect', lambda self, data: {'count': 1, 'detections': [{'box':[.1,.1,.2,.3],'confidence':.9}], 'recorded': True})
-    path = tmp_path / 'unused-replay.sqlite3'
-    client = TestClient(create_app(path, 't' * 32, controller=object()))
-    headers = {'Authorization':'Bearer ' + 't'*32,'Content-Type':'image/jpeg'}
-    assert client.get('/pilot/v1/replay/status').status_code == 401
-    assert client.get('/pilot/v1/replay/status',headers=headers).json()['available']
-    assert client.post('/pilot/v1/replay/frame',content=jpeg()).status_code == 401
-    assert client.post('/pilot/v1/replay/frame',content=jpeg(),headers={**headers,'Origin':'https://evil.example'}).status_code == 403
-    response = client.post('/pilot/v1/replay/frame',content=jpeg(),headers={**headers,'x-live-session':'not-a-live-session','x-frame-sequence':'1'})
-    assert response.status_code == 200
-    packet=response.json()
-    assert packet['count']==1 and packet['source']=='LOCAL_VIDEO_REPLAY'
-    assert not packet['recorded'] and not packet['tracking_supported'] and not packet['duration_accounting']
-    assert not path.exists()
-
-
 def test_busy_and_missing_model_are_actionable(tmp_path, monkeypatch):
     client = TestClient(create_app(tmp_path / 'unused.sqlite3', 't' * 32, controller=object()))
     headers = {'Authorization': 'Bearer ' + 't' * 32, 'Content-Type': 'image/jpeg'}
@@ -83,28 +65,6 @@ def test_busy_and_missing_model_are_actionable(tmp_path, monkeypatch):
     response = client.post('/pilot/v1/webcam/frame', content=jpeg(), headers=headers)
     assert response.status_code == 503
     assert response.json()['detail'] == 'setup model'
-
-
-def test_replay_session_envelope_times_frames_without_live_accounting(tmp_path, monkeypatch):
-    from uuid import uuid4
-    monkeypatch.setattr(WebcamDetector, 'detect', lambda self, data: {
-        'count': 1, 'detections': [{'box': [.1, .1, .2, .3], 'confidence': .9}], 'recorded': True})
-    database = tmp_path / 'unused.sqlite3'
-    client = TestClient(create_app(database, 't' * 32, controller=object()))
-    headers = {'Authorization': 'Bearer ' + 't' * 32, 'Content-Type': 'image/jpeg',
-               'x-replay-id': str(uuid4()), 'x-replay-generation': '0',
-               'x-replay-sequence': '1', 'x-replay-time': '0', 'x-live-session': 'ignored'}
-    endpoint = '/pilot/v1/replay/frame'
-    first = client.post(endpoint, content=jpeg(), headers=headers)
-    assert first.status_code == 200
-    next_headers = {**headers, 'x-replay-sequence': '2', 'x-replay-time': '.5'}
-    second = client.post(endpoint, content=jpeg(), headers=next_headers).json()
-    assert second['detections'][0]['session_id'] == first.json()['detections'][0]['session_id']
-    assert second['detections'][0]['accumulated_duration_us'] == 500_000
-    assert second['tracking_supported'] and not second['duration_accounting'] and not second['recorded']
-    assert client.post(endpoint, content=jpeg(), headers=next_headers).status_code == 409
-    assert client.post(endpoint, content=jpeg(), headers={**headers, 'x-replay-time': 'nan'}).status_code == 422
-    assert not database.exists()
 
 
 @pytest.mark.skipif(not MODEL_PATH.exists(), reason='Optional real model; run setup_webcam_model.py')

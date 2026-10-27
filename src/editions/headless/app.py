@@ -23,7 +23,6 @@ class Calibration(BaseModel):
     camera_key: str = Field(pattern=r'^[a-f0-9]{64}$')
     zones: list[dict] = Field(min_length=1, max_length=16)
     rules: dict
-    position: dict | None = None
 
 
 def create_app(service, token, *, webhook=None):
@@ -90,8 +89,7 @@ def create_app(service, token, *, webhook=None):
     @app.get('/api/v1/status', dependencies=auth)
     def status():
         return {'edition': 'headless', 'max_cameras': service.license.max_cameras,
-                'cameras': service.all_status(), 'scheduler': service.scheduling_snapshot(),
-                'onvif': False, 'processed_rtsp_output': False}
+                'cameras': service.all_status(), 'onvif': False, 'processed_rtsp_output': False}
 
     @app.get('/api/v1/cameras', dependencies=auth)
     def cameras():

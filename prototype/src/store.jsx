@@ -1,16 +1,15 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { advanceState, dataset, effectiveWorkspace, initialState } from './fixtures';
 
-const STORAGE_KEY = 'cctv-workspace-v2';
+const STORAGE_KEY = 'cctv-design-prototype-v1';
 const Context = createContext(null);
 const uid = () => crypto.randomUUID();
 
 function load() {
   try {
-    localStorage.removeItem('cctv-design-prototype-v1');
     const value = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    if (value?.version === 2 && Array.isArray(value.cameras) && Array.isArray(value.workspaces) && value.settings && Array.isArray(value.liveIntervals) && Number.isFinite(value.clock)) return value;
-  } catch { /* Unavailable or invalid browser storage starts an empty workspace. */ }
+    if (value?.version === 1 && Array.isArray(value.cameras) && Array.isArray(value.workspaces) && value.settings && Array.isArray(value.liveIntervals) && Number.isFinite(value.clock)) return value;
+  } catch { /* Storage unavailable or an invalid previous demo; use the fixture. */ }
   return initialState();
 }
 const addEvent = (state, message, type = 'CONFIG_CHANGE', extra = {}) => ({ ...state, events: [{ id: uid(), time: state.clock, cameraId: null, workspaceId: null, message, type, ...extra }, ...state.events].slice(0, 100) });
@@ -65,9 +64,9 @@ export function PrototypeProvider({ children }) {
     setState(previous => {
       const id = draft.id || `CAM-${String(Math.max(0, ...previous.cameras.map(c => Number(c.id.slice(4)))) + 1).padStart(2, '0')}`;
       const camera = { ...draft, id, revision: (draft.revision ?? 0) + 1, reconnects: draft.reconnects ?? 0, status: draft.enabled ? 'OFFLINE' : 'DISABLED', changedAt: previous.clock };
-      return addEvent({ ...previous, cameras: isNew ? [...previous.cameras, camera] : previous.cameras.map(c => c.id === id ? camera : c) }, `${camera.name}: konfigurasi disimpan`, 'CONFIG_CHANGE', { cameraId: id });
+      return addEvent({ ...previous, cameras: isNew ? [...previous.cameras, camera] : previous.cameras.map(c => c.id === id ? camera : c) }, `${camera.name}: konfigurasi simulasi disimpan`, 'CONFIG_CHANGE', { cameraId: id });
     });
-    notify('Konfigurasi kamera disimpan lokal.');
+    notify('Konfigurasi kamera disimpan lokal. Jalankan uji koneksi simulasi.');
   }
   function testCamera(id, succeeds = true) {
     const valid = succeeds && state.cameras.find(c => c.id === id)?.credentialConfigured;
@@ -109,7 +108,7 @@ export function PrototypeProvider({ children }) {
   }
   function reset() {
     setPlaying(false); pending.current.forEach(timers => timers.forEach(window.clearTimeout)); pending.current.clear();
-    setJobs([]); setState(initialState()); setDirtyPage(false); setDialog(null); notify('Data lokal dikosongkan.');
+    setJobs([]); setState(initialState()); setDirtyPage(false); setDialog(null); notify('Dataset simulasi dikembalikan ke kondisi awal.');
   }
   const records = useMemo(() => dataset(state), [state.workspaces, state.liveIntervals, state.emptyHistory]);
   const observed = useMemo(() => state.workspaces.map(w => effectiveWorkspace(w, state)), [state.workspaces, state.cameras, state.persistence]);

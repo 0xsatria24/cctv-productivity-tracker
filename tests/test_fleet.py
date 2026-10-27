@@ -149,7 +149,7 @@ def test_multi_api_auth_camera_report_and_backup(tmp_path, monkeypatch):
     original = module.CameraFleet
     monkeypatch.setattr(module, 'CameraFleet', lambda settings, detector: original(settings, detector, capture_factory=Capture))
     detector = FixtureDetector(); detector.runtime_label = 'SYNTHETIC'; detector.session = True; detector.manifest = {}
-    monkeypatch.setattr(construction, 'create_detector', lambda *args, **kwargs: detector)
+    monkeypatch.setattr(construction, 'create_detector', lambda *args: detector)
     path = tmp_path / 'api.sqlite3'
     with closing(Database(path)):
         pass

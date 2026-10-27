@@ -1,61 +1,59 @@
 import pytest
-
-from cctv_tracker.evaluation import evaluate_replay, match_boxes
-
-
-def examples():
-    labels={'schema_version':1,'reviewer':'synthetic metric test','frames':[
-        {'time':t,'people':[{'box':[.1,.1,.3,.8],'person_id':'a'}],'zones':{'desk':'OCCUPIED'}} for t in (0,.2,.4)]}
-    rows=[{'time':t,'detections':[{'box':[.1,.1,.3,.8],'session_id':'one'}],
-           'workstations':[{'zone_id':'desk','occupied_us':round(t*1e6),'empty_us':0,'unknown_us':0}]} for t in (0,.2,.4)]
-    return labels,rows
+from cctv_tracker.evaluation import evaluate
 
 
-def test_quality_metrics_use_independent_boxes_ids_and_workstation_time():
-    labels,rows=examples()
-    report=evaluate_replay(labels,rows,minimum_seconds=.4)
-    assert report['precision']==report['recall']==1
-    assert report['labeled_clip_passed'] and not report['production_ready']
-    assert report['workstations']['desk']['duration_error_ratio']==0
-    assert not evaluate_replay(labels,rows)['labeled_clip_passed']
+def truth():
+    return {'version': 1, 'zones': [{'id': 'desk', 'name': 'Desk', 'polygon': [[0, 0], [1, 0], [1, 1], [0, 1]],
+             'intervals': [{'start_seconds': 0, 'end_seconds': 10, 'state': 'OCCUPIED'}, {'start_seconds': 10, 'end_seconds': 20, 'state': 'EMPTY'}]}]}
 
 
-def test_false_merge_and_switch_and_missed_person_cannot_pass():
-    labels,rows=examples()
-    labels['frames'][1]['people'][0]['person_id']='b'
-    labels['frames'][2]['people'][0]['person_id']='b'
-    rows[2]['detections'][0]['session_id']='two'
-    report=evaluate_replay(labels,rows,minimum_seconds=.4)
-    assert report['sessions_with_multiple_labeled_people']==1
-    assert report['session_id_switches']==1 and not report['labeled_clip_passed']
-    rows[2]['detections']=[]
-    assert evaluate_replay(labels,rows)['recall']==pytest.approx(2/3)
+def test_accuracy_cannot_hide_unknown_and_missing_classes():
+    predictions = {'desk': [{'start_seconds': 0, 'end_seconds': 1, 'state': 'OCCUPIED'}, {'start_seconds': 10, 'end_seconds': 11, 'state': 'EMPTY'}]}
+    result = evaluate(truth(), predictions, .8)
+    assert result['coverage'] == .1
+    assert result['unknown_seconds'] == 18
+    assert result['classes']['OCCUPIED']['precision_valid'] == 1
+    assert not result['gate']['passed']
+    assert evaluate(truth(), {'desk': truth()['zones'][0]['intervals']}, .8)['gate']['passed']
+    assert not evaluate(truth(), {}, .8)['gate']['passed']
 
 
-def test_unknown_time_reduces_coverage_and_is_not_treated_as_accurate_occupancy():
-    labels,rows=examples()
-    for row in rows:
-        row['workstations'][0]['unknown_us']=row['workstations'][0]['occupied_us']
-        row['workstations'][0]['occupied_us']=0
-    report=evaluate_replay(labels,rows,minimum_seconds=.4)
-    assert report['workstations']['desk']['coverage']==0
-    assert report['workstations']['desk']['duration_error_ratio']==1
-    assert not report['labeled_clip_passed']
+def test_duration_weighting_and_overlap_rejection():
+    rows = [{'start_seconds': 0, 'end_seconds': 5, 'state': 'EMPTY'}, {'start_seconds': 5, 'end_seconds': 20, 'state': 'OCCUPIED'}]
+    result = evaluate(truth(), {'desk': rows}, .8)
+    assert result['classes']['OCCUPIED']['precision_valid'] == 1 / 3
+    assert result['classes']['OCCUPIED']['recall_valid'] == .5
+    rows[1]['start_seconds'] = 4
+    with pytest.raises(ValueError, match='overlap'):
+        evaluate(truth(), {'desk': rows}, .8)
 
 
-def test_matching_is_one_to_one_and_uses_maximum_cardinality():
-    a={'box':[0,0,.6,1]};b={'box':[.4,0,1,1]}
-    assert len(match_boxes([a,b],[{'box':[.2,0,.8,1]},a],.4))==2
-    assert len(match_boxes([a,a],[a]))==1
+@pytest.mark.parametrize('bad', [float('nan'),float('inf'),-1])
+def test_nonfinite_and_negative_predictions_are_rejected(bad):
+    with pytest.raises(ValueError):
+        evaluate(truth(),{'desk':[{'start_seconds':bad,'end_seconds':20,'state':'EMPTY'}]},.8)
 
 
-@pytest.mark.parametrize('kind',['missing','reset','time','unreviewed','box','zone'])
-def test_invalid_evaluation_fails_closed(kind):
-    labels,rows=examples()
-    if kind=='missing':labels['frames'].pop()
-    if kind=='reset':rows[2]['workstations'][0]['occupied_us']=0
-    if kind=='time':rows[1]['time']=9
-    if kind=='unreviewed':labels['reviewer']=''
-    if kind=='box':labels['frames'][0]['people'][0]['box']=[0,0,2,2]
-    if kind=='zone':labels['frames'][0]['zones']={}
-    with pytest.raises(ValueError):evaluate_replay(labels,rows)
+def test_replay_uses_weak_candidates_and_live_image_transform(tmp_path,monkeypatch):
+    import json
+    from types import SimpleNamespace
+    import cctv_tracker.engine as engine
+    from cctv_tracker.evaluation import replay_video
+    from test_dataset import make_video
+    video=tmp_path/'source.mp4';make_video(video)
+    annotation=truth()
+    annotation['zones'][0]['intervals']=[{'start_seconds':0,'end_seconds':1.1,'state':'OCCUPIED'}]
+    path=tmp_path/'labels.json';path.write_text(json.dumps(annotation))
+    def detect(jpeg):
+        import cv2
+        import numpy as np
+        assert cv2.imdecode(np.frombuffer(jpeg,np.uint8),1).shape[:2] == (320,640)
+        return {'detections':[],'tracking_candidates':[{'box':[.1,.1,.4,.8],'confidence':.2}]}
+    fake=SimpleNamespace(detect=detect,sha='f'*64,manifest={'source':'SYNTHETIC_TEST'})
+    monkeypatch.setattr(engine,'create_detector',lambda *_:fake)
+    result=replay_video(video,path,tmp_path/'evaluation',minimum_coverage=.8)
+    assert result['coverage'] == 0  # Weak person evidence is UNKNOWN, not EMPTY.
+    assert result['corrupt_frames_dropped'] == 0
+    assert result['wall_clock_capacity_validated'] is False
+    predictions=json.loads((tmp_path/'evaluation'/'predictions.json').read_text())
+    assert {r['state'] for r in predictions['desk']} == {'UNKNOWN'}

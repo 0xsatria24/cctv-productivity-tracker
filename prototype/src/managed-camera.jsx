@@ -3,7 +3,7 @@ import { Button, Panel, Status } from './components';
 import { CalibrationDialog } from './live-engine';
 import { engineRequest } from './engine-client';
 
-export function ManagedCameraControls({ camera, engine, areaRequest=0 }) {
+export function ManagedCameraControls({ camera, engine }) {
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [calibration, setCalibration] = useState(null);
   const [autoResume, setAutoResume] = useState(camera.auto_resume || false);
   const recoveryPending = useRef(false);
@@ -18,10 +18,6 @@ export function ManagedCameraControls({ camera, engine, areaRequest=0 }) {
   }
   const active = ['STARTING', 'RUNNING', 'STOPPING'].includes(camera.engine?.status);
   const profile = camera.engine?.calibrations?.RTSP_LIVE;
-  useEffect(() => {
-    if (!areaRequest) return;
-    calibrate();
-  }, [areaRequest]);
   async function action(path, body) {
     setBusy(true); setError('');
     try {
@@ -33,19 +29,6 @@ export function ManagedCameraControls({ camera, engine, areaRequest=0 }) {
   async function calibrate() {
     setBusy(true); setError('');
     try {
-      if (active) {
-        await action('stop');
-        setBusy(true);
-        const deadline = Date.now() + 10000;
-        while (true) {
-          const registry = await engineRequest('camera-wall');
-          const current = registry.cameras.find(row => row.id === camera.id);
-          if (!current) throw new Error('Kamera tidak lagi tersedia.');
-          if (!['STARTING', 'RUNNING', 'STOPPING'].includes(current.engine?.status)) break;
-          if (Date.now() >= deadline) throw new Error('Kamera masih berhenti. Coba Atur area lagi setelah sesi selesai.');
-          await new Promise(resolve => setTimeout(resolve, 200));
-        }
-      }
       const response = await fetch(`/pilot/v1/camera-wall/cameras/${camera.id}/frame.jpg`, { cache: 'no-store', signal: AbortSignal.timeout(5000) });
       if (!response.ok) throw new Error('Tampilkan kamera pada grid dan tunggu frame baru sebelum kalibrasi.');
       const blob = await response.blob(), bitmap = await createImageBitmap(blob);
@@ -57,7 +40,7 @@ export function ManagedCameraControls({ camera, engine, areaRequest=0 }) {
   }
   return <Panel title={`Monitoring ${camera.name}`} caption="Kalibrasi dan histori tersimpan untuk kamera ini. Kamera lain dapat dianalisis bersamaan.">
     <div className="inline-controls"><Status value={camera.health} label={active ? 'Analisis kamera aktif' : profile ? 'Zona tersimpan' : 'Kalibrasi diperlukan'}/>
-      <Button disabled={busy || camera.health !== 'ONLINE'} onClick={calibrate}>Atur zona kamera</Button>
+      <Button disabled={busy || active || camera.health !== 'ONLINE'} onClick={calibrate}>Atur zona kamera</Button>
       <Button variant="primary" disabled={busy || active || !profile} onClick={() => action('start').then(() => engine.toast('Analisis kamera dimulai. Menunggu observasi zona.')).catch(() => {})}>Mulai analisis kamera</Button>
       <Button disabled={busy || !active || camera.engine?.status === 'STOPPING'} onClick={() => action('stop').then(() => engine.toast('Penghentian kamera diminta. Tunggu status berhenti.')).catch(() => {})}>Hentikan analisis kamera</Button>
       <Button onClick={() => { engine.setDataset('live'); engine.setCameraId(camera.id); window.location.hash = '/reports'; }}>Laporan kamera ini</Button>

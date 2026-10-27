@@ -8,7 +8,6 @@ import time
 
 from .dataset import iou
 from .vision import Detection
-from .person_detection import detection_proposals
 
 
 class ZoomExperiment:
@@ -35,7 +34,7 @@ class ZoomExperiment:
             raise ValueError('Detector dimensions do not match the image')
         if 'tracking_candidates' not in whole:
             raise ValueError('Zoom experiment requires unfiltered measured candidates')
-        candidates=[dict(d) for d in detection_proposals(whole)]
+        candidates=[dict(d) for d in whole['tracking_candidates']]
         boundary_rejected=0
         for region in self.regions:
             x0,y0,x1,y1=round(region[0]*width),round(region[1]*height),round(region[2]*width),round(region[3]*height)
@@ -48,7 +47,7 @@ class ZoomExperiment:
             result=self.detector.detect(encoded.tobytes())
             if (result['width'],result['height'])!=(crop_width,crop_height):
                 raise ValueError('Detector dimensions do not match the crop')
-            for row in detection_proposals(result):
+            for row in result['tracking_candidates']:
                 box=row['box'];Detection(tuple(box),row['confidence'])
                 # Artificial crop-edge fragments must not become extra people.
                 # A true image edge is allowed; it represents an actually clipped
@@ -70,8 +69,7 @@ class ZoomExperiment:
                 kept.append(row)
         self.manifest.update(self.detector.manifest)
         detections=[d for d in kept if d['confidence']>=self.manifest['threshold']]
-        return {'width':width,'height':height,'detections':detections,
-                'tracking_candidates':[row for row in kept if row['confidence'] < self.manifest['threshold']],
+        return {'width':width,'height':height,'detections':detections,'tracking_candidates':kept,
                 'count':len(detections),'model':'YOLOX OFFLINE ROI-ZOOM EXPERIMENT',
                 'inference_ms':(time.perf_counter()-started)*1000,
                 'zoom_passes':1+len(self.regions),'boundary_candidates_rejected':boundary_rejected}

@@ -55,8 +55,6 @@ def main(argv=None):
     dashboard.add_argument("--port", type=int, default=8765)
     dashboard.add_argument('--detector', choices=['nanodet', 'yolox', 'yolox-openvino'], default='yolox-openvino', help='YOLOX OpenVINO: optimized quality mode; yolox: ONNX baseline; nanodet: lightweight')
     dashboard.add_argument('--openvino-device', choices=['CPU', 'GPU'], default='GPU', help='Explicit OpenVINO device; no silent fallback')
-    dashboard.add_argument('--detection-profile', choices=['balanced', 'detail'], help='YOLOX detail runs full frame plus overlapping tiles; costs up to five model passes')
-    dashboard.add_argument('--detection-confidence', type=float, help='YOLOX public person confidence >= tracking_confidence; lower values require false-positive validation')
     dashboard.add_argument("--ui-dir", type=Path, default=Path(__file__).resolve().parents[2] / "prototype" / "dist")
     args = parser.parse_args(argv)
     logger = configure_logging(args.log_dir or app_data() / "logs")
@@ -124,10 +122,6 @@ def main(argv=None):
                 import secrets
                 if not args.config:
                     settings = replace(load_settings(Path(str(files("cctv_tracker").joinpath("resources", "pilot.example.json")))), database=settings.database)
-                if args.detection_profile:
-                    settings = replace(settings, detection=replace(settings.detection, detail=args.detection_profile == 'detail'))
-                if args.detection_confidence is not None:
-                    settings = replace(settings, detection=replace(settings.detection, confidence=args.detection_confidence))
                 controller = ReplayController(settings)
                 token = secrets.token_urlsafe(32)
                 app = create_app(settings.database, token, controller=controller, ui_dir=args.ui_dir, timezone=settings.timezone, detector_kind=args.detector, openvino_device=args.openvino_device)

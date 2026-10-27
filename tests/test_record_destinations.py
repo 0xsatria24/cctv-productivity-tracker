@@ -156,7 +156,7 @@ def test_destination_api_auth_validation_and_secret_redaction(tmp_path,monkeypat
     import cctv_tracker.engine as module
     from test_live import FixtureDetector
     detector=FixtureDetector();detector.runtime_label='SYNTHETIC';detector.session=True;detector.manifest={}
-    monkeypatch.setattr(module,'create_detector',lambda *args, **kwargs:detector)
+    monkeypatch.setattr(module,'create_detector',lambda *args:detector)
     settings=Settings(database=tmp_path/'app.sqlite3')
     with closing(Database(settings.database)): pass
     with TestClient(create_app(settings.database,'t'*40,controller=ReplayController(settings))) as client:

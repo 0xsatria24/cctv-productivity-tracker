@@ -4,8 +4,6 @@ import { engineRequest, seconds } from './engine-client';
 import { validPolygon } from './domain';
 import { Check } from 'lucide-react';
 import { monitoringText, reasonText } from './operations-domain.mjs';
-import { AreaCalibration } from './area-calibration';
-import { DEFAULT_WORKSTATION_RULES } from './workstation-engine';
 
 export function useLiveEngine(webcam, engine) {
   const [state, setState] = useState(null), [error, setError] = useState(''), [busy, setBusy] = useState(false), [receivedAt, setReceivedAt] = useState(null);
@@ -59,7 +57,7 @@ export function useLiveEngine(webcam, engine) {
     webcamStarting: !!ownedSession && state?.source === 'WEBCAM_LIVE' && state?.status === 'STARTING' };
 }
 
-export function LiveEnginePanel({ live, webcam, engine, onReports, hidePreview = false, cameras = [], selected = 'webcam', onSelect, onAdd,areaRequest=0 }) {
+export function LiveEnginePanel({ live, webcam, engine, onReports, hidePreview = false, cameras = [], selected = 'webcam', onSelect, onAdd }) {
   const selectedCamera=cameras.find(c=>c.id===selected)||{id:'webcam',name:'Webcam lokal'};
   const camera=live.active?(cameras.find(c=>live.state?.source==='WEBCAM_LIVE'?c.id==='webcam':c.camera_key===live.state?.camera_key)||selectedCamera):selectedCamera;
   const source=camera.id==='webcam'?'WEBCAM_LIVE':'RTSP_LIVE';
@@ -104,7 +102,7 @@ export function LiveEnginePanel({ live, webcam, engine, onReports, hidePreview =
       canvas.getContext('2d').drawImage(element, 0, 0, w, h);
       const frame = canvas.toDataURL('image/jpeg', 0.8);
       if (live.active) await stopAndWait();
-      setCalibration({ frame, width: w, height: h, camera_key: key, source, profile: validProfile ? profile : null,rules:live.state?.workstation_policy?.rules });
+      setCalibration({ frame, width: w, height: h, camera_key: key, source, profile: validProfile ? profile : null });
     } catch (failure) { setNotice(failure.message); }
   }
   async function begin() {
@@ -112,20 +110,11 @@ export function LiveEnginePanel({ live, webcam, engine, onReports, hidePreview =
     try {
       if (!validProfile) throw new Error('Atur dan simpan zona untuk kamera ini terlebih dahulu.');
       if (live.active && live.state?.preview_only) await stopAndWait();
-      if(profile.analysis_mode!=='workstation')await live.action('calibration',{
-        source,width:profile.width,height:profile.height,camera_key:profile.camera_key,zones:profile.zones,
-        rules:profile.rules,position:profile.position,markers:profile.markers||[],analysis_mode:'workstation',
-      });
       await live.start(source, null, false, source==='RTSP_LIVE'?camera.id:undefined); engine.toast('Sesi monitoring dimulai. Menunggu konfirmasi observasi zona.');
     } catch (failure) { setNotice(failure.message); }
   }
-  useEffect(()=>{
-    if(!areaRequest)return;
-    if(connected)calibrate();
-    else {setStep(2);setNotice('Hubungkan kamera terlebih dahulu, lalu klik Atur area pada preview.');}
-  },[areaRequest]);
   const completed = [true, connected, validProfile, recording];
-  const steps = ['Pilih kamera', 'Cek koneksi', 'Atur area', 'Mulai monitoring'];
+  const steps = ['Pilih kamera', 'Cek koneksi', 'Atur zona', 'Mulai monitoring'];
   return <Panel title="Setup monitoring" caption="Ikuti langkah berikut untuk menghasilkan catatan workstation." className="live-engine-panel setup-panel" action={<Status value={recording && live.state?.camera_health === 'ONLINE' ? 'ONLINE' : live.state?.status === 'FAILED' ? 'OFFLINE' : 'DISABLED'} label={monitoringText(live.state, live.error)}/>}>
     <ol className="setup-progress">{steps.map((label, i) => <li key={label}><button type="button" aria-current={step === i + 1 ? 'step' : undefined} disabled={recording && i < 3} onClick={() => setStep(i + 1)}><span>{completed[i] && i > 0 ? <Check size={14}/> : i + 1}</span><strong>{label}</strong><small>{i === 0 ? source === 'WEBCAM_LIVE' ? 'Webcam lokal' : 'Kamera RTSP' : completed[i] ? 'Selesai' : 'Belum selesai'}</small></button></li>)}</ol>
     <div className="setup-step-content" aria-busy={working}>
@@ -136,43 +125,16 @@ export function LiveEnginePanel({ live, webcam, engine, onReports, hidePreview =
       {(notice || live.error || sourceError) && <p role="alert" className="error-text">{notice || live.error || sourceError}</p>}
       {live.state?.run_id && <p className="caption">Sesi {live.state.run_id.slice(0, 8)} · {live.state.processed} observasi tersimpan. Rekaman video diatur terpisah di Pengaturan.</p>}
     </div>
-    {live.state?.latest?.analysis_mode==='person'&&live.state?.latest?.zones && <div className="live-zone-states">{live.state.latest.zones.map(z => <div key={z.id}><strong>{z.name}</strong><Status value={z.state}/><span>{z.count == null ? 'Jumlah belum dapat dipastikan' : `${z.count} orang teramati`} · {seconds(z.evidence_until_utc_us - z.state_since_utc_us)} pada status ini</span>{z.reason && <small>{reasonText(z.reason)}</small>}</div>)}</div>}
+    {live.state?.latest?.zones && <div className="live-zone-states">{live.state.latest.zones.map(z => <div key={z.id}><strong>{z.name}</strong><Status value={z.state}/><span>{z.count == null ? 'Jumlah belum dapat dipastikan' : `${z.count} orang teramati`} · {seconds(z.evidence_until_utc_us - z.state_since_utc_us)} pada status ini</span>{z.reason && <small>{reasonText(z.reason)}</small>}</div>)}</div>}
     {calibration && <CalibrationDialog value={calibration} live={live} onSaved={() => { setCalibration(null); setStep(4); engine.toast('Kalibrasi zona berhasil disimpan untuk kamera ini.'); }} onClose={() => setCalibration(null)}/>}
   </Panel>;
 }
 
 export function CalibrationDialog({ value, live, onClose, onSaved }) {
-  if(value.profile?.position?.mode==='homography')return <AdvancedCalibrationDialog value={value} live={live} onClose={onClose} onSaved={onSaved}/>;
-  const initial={zones:(value.profile?.zones||[]).map(({id,name,polygon})=>({id,name,polygon})),association:value.profile?.position?.mode||'bbox_overlap',markers:value.profile?.markers||[]};
-  return <AreaCalibration liveMode initial={initial} image={{url:value.frame,width:value.width,height:value.height}} onClose={onClose} onSave={async area=>{
-    await live.action('calibration',{source:value.source,width:value.width,height:value.height,camera_key:value.camera_key,
-      analysis_mode:'workstation',markers:area.markers,zones:area.zones.map(z=>({...z,exclusive_group:'workstations'})),
-      rules:value.profile?.rules||value.rules||DEFAULT_WORKSTATION_RULES,
-      position:{mode:area.association}});
-    (onSaved||onClose)();
-  }}/>;
-}
-
-function AdvancedCalibrationDialog({ value, live, onClose, onSaved }) {
   const [zones, setZones] = useState(value.profile?.zones || []), [points, setPoints] = useState([]), [name, setName] = useState(''), [editing, setEditing] = useState(null);
-  const [rules, setRules] = useState(value.profile?.rules || value.rules || DEFAULT_WORKSTATION_RULES);
+  const [rules, setRules] = useState(value.profile?.rules || { occupied_confirm_seconds: 2, empty_confirm_seconds: 5, max_evidence_gap_seconds: 3, association_overlap: 0.25, ambiguity_margin: 0.1, strong_confidence: 0.5 });
   const [error, setError] = useState(''), [coordinate, setCoordinate] = useState({ x: '0.5', y: '0.5' });
-  const [position, setPosition] = useState(value.profile?.position || { mode: 'bbox_overlap', image_points: [], floor_width_m: '', floor_depth_m: '', image_boundary_margin: 0.01, floor_boundary_margin_m: 0.1 });
-  const [target, setTarget] = useState('zone');
-  const floorMode = position.mode === 'homography', drawingFloor = floorMode && target === 'floor';
-  const draft = drawingFloor ? position.image_points : points;
-  function changePosition(key, next) { setPosition(p => ({ ...p, [key]: next })); setError(''); }
-  function addPoint(point) {
-    if (drawingFloor) {
-      if (position.image_points.length >= 4) { setError('Empat titik lantai sudah lengkap. Urungkan titik untuk mengubahnya.'); return; }
-      setPosition(p => ({ ...p, image_points: [...p.image_points, point] }));
-    } else {
-      if (points.length >= 64) { setError('Maksimal 64 titik per zona.'); return; }
-      setPoints(p => [...p, point]);
-    }
-    setError('');
-  }
-  function undoPoint() { if (drawingFloor) setPosition(p => ({ ...p, image_points: p.image_points.slice(0, -1) })); else setPoints(p => p.slice(0, -1)); }
+  function addPoint(point) { if (points.length >= 64) { setError('Maksimal 64 titik per zona.'); return; } setPoints(p => [...p, point]); setError(''); }
   function storeZone() {
     if (!name.trim() || !validPolygon(points)) { setError('Nama dan polygon sederhana minimal 3 titik diperlukan; garis tidak boleh berpotongan.'); return; }
     const zone = { id: editing || crypto.randomUUID(), name: name.trim(), polygon: points, exclusive_group: 'workstations' };
@@ -180,30 +142,18 @@ function AdvancedCalibrationDialog({ value, live, onClose, onSaved }) {
   }
   async function save() {
     if (points.length || name.trim()) { setError('Simpan atau batalkan zona yang sedang digambar sebelum menyimpan kalibrasi.'); return; }
-    if (floorMode && (position.image_points.length !== 4 || !validPolygon(position.image_points) || !(Number(position.floor_width_m) >= 0.1) || !(Number(position.floor_depth_m) >= 0.1))) { setError('Pilih empat sudut lantai berurutan dan isi lebar serta kedalaman nyata dalam meter.'); return; }
-    const savedPosition = { ...position, image_points: floorMode ? position.image_points : [], floor_width_m: floorMode ? Number(position.floor_width_m) : null, floor_depth_m: floorMode ? Number(position.floor_depth_m) : null };
-    try { await live.action('calibration', { source: value.source, width: value.width, height: value.height, camera_key: value.camera_key, zones, rules, position: savedPosition, analysis_mode:'workstation',markers:value.profile?.markers||[] }); (onSaved || onClose)(); }
+    try { await live.action('calibration', { source: value.source, width: value.width, height: value.height, camera_key: value.camera_key, zones, rules }); (onSaved || onClose)(); }
     catch (failure) { setError(failure.message); }
   }
   return <Modal title="Kalibrasi zona live" description="Frame dibekukan tanpa mirror. Klik titik batas workstation berurutan, simpan zona, lalu simpan kalibrasi. Kalibrasikan ulang jika kamera atau posisinya berubah." wide onClose={onClose}>
-    <div className="engine-form section-gap">
-      <Field label="Metode penentuan zona"><select value={position.mode} onChange={e => { changePosition('mode', e.target.value); setTarget('zone'); }}><option value="bbox_overlap">Overlap kotak (kalibrasi lama)</option><option value="footpoint">Titik kaki pada gambar</option><option value="homography">Titik kaki pada lantai (homography)</option></select></Field>
-      {position.mode !== 'bbox_overlap' && <p className="helper-text">Posisi diperkirakan dari tengah bawah kotak orang. Gambar zona pada lantai. Kaki terpotong frame atau posisi dekat batas menghasilkan status tidak pasti. Kaki tertutup benda atau orang duduk tetap bisa salah posisi.</p>}
-      {floorMode && <>
-        <Field label="Gambar pada frame"><select value={target} onChange={e => setTarget(e.target.value)}><option value="zone">Batas zona</option><option value="floor">Empat sudut lantai</option></select></Field>
-        <p className="helper-text">Pilih sudut persegi panjang lantai nyata berurutan: 1 = (0,0), 2 = (lebar,0), 3 = (lebar,kedalaman), 4 = (0,kedalaman). Semua zona harus di dalamnya. Gunakan satu permukaan lantai datar.</p>
-        <div className="calibration-rules">{[['floor_width_m', 'Lebar lantai nyata (meter)', 0.1, 1000], ['floor_depth_m', 'Kedalaman lantai nyata (meter)', 0.1, 1000], ['floor_boundary_margin_m', 'Toleransi batas (meter)', 0.01, 5]].map(([key, label, min, max]) => <Field key={key} label={label}><input type="number" min={min} max={max} step="0.01" value={position[key] ?? ''} onChange={e => changePosition(key, e.target.value === '' ? '' : Number(e.target.value))}/></Field>)}</div>
-      </>}
-      {position.mode === 'footpoint' && <Field label="Toleransi batas (fraksi gambar)"><input type="number" min="0.001" max="0.1" step="0.001" value={position.image_boundary_margin} onChange={e => changePosition('image_boundary_margin', e.target.value === '' ? '' : Number(e.target.value))}/></Field>}
-    </div>
     <div className="calibration-frame" style={{ aspectRatio: `${value.width}/${value.height}` }} onClick={event => { const rect = event.currentTarget.getBoundingClientRect(); addPoint([Number(((event.clientX - rect.left) / rect.width).toFixed(4)), Number(((event.clientY - rect.top) / rect.height).toFixed(4))]); }}>
       <img src={value.frame} alt="Frame kalibrasi kamera tanpa mirror"/>
-      <svg viewBox="0 0 1000 1000" preserveAspectRatio="none">{zones.map(z => <polygon key={z.id} points={z.polygon.map(([x, y]) => `${x * 1000},${y * 1000}`).join(' ')} className="zone-overlay"/>)}{floorMode && <polygon points={position.image_points.map(([x, y]) => `${x * 1000},${y * 1000}`).join(' ')} className="calibration-draft"/>}<polyline points={points.map(([x, y]) => `${x * 1000},${y * 1000}`).join(' ')} className="calibration-draft"/>{draft.map(([x, y], i) => <g key={i}><circle cx={x * 1000} cy={y * 1000} r="6"/><text x={x * 1000 + 10} y={y * 1000 + 24} className="calibration-point-label">{i + 1}</text></g>)}</svg>
+      <svg viewBox="0 0 1000 1000" preserveAspectRatio="none">{zones.map(z => <polygon key={z.id} points={z.polygon.map(([x, y]) => `${x * 1000},${y * 1000}`).join(' ')} className="zone-overlay"/>)}<polyline points={points.map(([x, y]) => `${x * 1000},${y * 1000}`).join(' ')} className="calibration-draft"/>{points.map(([x, y], i) => <circle key={i} cx={x * 1000} cy={y * 1000} r="6"/>)}</svg>
     </div>
-    <div className="engine-form section-gap">{!drawingFloor && <Field label="Nama zona live"><input maxLength={80} value={name} onChange={e => setName(e.target.value)}/></Field>}
+    <div className="engine-form section-gap"><Field label="Nama zona live"><input maxLength={80} value={name} onChange={e => setName(e.target.value)}/></Field>
       <div className="calibration-coordinates"><Field label="Koordinat X (0 sampai 1)"><input type="number" min="0" max="1" step="0.01" value={coordinate.x} onChange={e => setCoordinate(c => ({ ...c, x: e.target.value }))}/></Field><Field label="Koordinat Y (0 sampai 1)"><input type="number" min="0" max="1" step="0.01" value={coordinate.y} onChange={e => setCoordinate(c => ({ ...c, y: e.target.value }))}/></Field><Button onClick={() => { const x = Number(coordinate.x), y = Number(coordinate.y); if (coordinate.x === '' || coordinate.y === '' || !Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > 1 || y < 0 || y > 1) setError('Koordinat harus antara 0 dan 1.'); else addPoint([x, y]); }}>Tambah titik koordinat</Button></div>
-      <div className="inline-controls"><span>{draft.length} titik {drawingFloor ? 'lantai dari 4' : 'zona'}</span><Button disabled={!draft.length} onClick={undoPoint}>Urungkan titik</Button>{!drawingFloor && <><Button onClick={() => { setPoints([]); setName(''); setEditing(null); }}>Batalkan zona</Button><Button disabled={zones.length >= 16 && !editing} onClick={storeZone}>Simpan zona</Button></>}</div>
-      {zones.map(z => <div key={z.id} className="calibration-zone-row"><strong>{z.name}</strong><span>{z.polygon.length} titik</span><Button disabled={!!points.length} onClick={() => { setTarget('zone'); setEditing(z.id); setName(z.name); setPoints(z.polygon); }}>Edit zona</Button><Button onClick={() => { setZones(all => all.filter(item => item.id !== z.id)); if (editing === z.id) { setEditing(null); setPoints([]); setName(''); } }}>Hapus zona</Button></div>)}
+      <div className="inline-controls"><span>{points.length} titik</span><Button disabled={!points.length} onClick={() => setPoints(p => p.slice(0, -1))}>Urungkan titik</Button><Button onClick={() => { setPoints([]); setName(''); setEditing(null); }}>Batalkan zona</Button><Button disabled={zones.length >= 16 && !editing} onClick={storeZone}>Simpan zona</Button></div>
+      {zones.map(z => <div key={z.id} className="calibration-zone-row"><strong>{z.name}</strong><span>{z.polygon.length} titik</span><Button disabled={!!points.length} onClick={() => { setEditing(z.id); setName(z.name); setPoints(z.polygon); }}>Edit zona</Button><Button onClick={() => { setZones(all => all.filter(item => item.id !== z.id)); if (editing === z.id) { setEditing(null); setPoints([]); setName(''); } }}>Hapus zona</Button></div>)}
       <div className="calibration-rules">{[['occupied_confirm_seconds', 'Konfirmasi terisi (detik)', 0.1, 60], ['empty_confirm_seconds', 'Konfirmasi kosong (detik)', 0.1, 120], ['max_evidence_gap_seconds', 'Batas gap frame (detik)', 0.5, 10]].map(([key, label, min, max]) => <Field key={key} label={label}><input type="number" min={min} max={max} step="0.1" value={rules[key]} onChange={e => setRules(r => ({ ...r, [key]: e.target.value === '' ? '' : Number(e.target.value) }))}/></Field>)}</div>
       {error && <p className="error-text" role="alert">{error}</p>}
       <div className="modal-actions"><Button onClick={onClose}>Batal</Button><Button variant="primary" disabled={!zones.length || live.busy || live.active} onClick={save}>Simpan kalibrasi live</Button></div>
