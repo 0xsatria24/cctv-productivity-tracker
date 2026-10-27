@@ -65,6 +65,13 @@ class OpenVinoExtractor:
             raise RuntimeError('ReID execution device mismatch')
         self.compiled, self.request = compiled, compiled.create_infer_request()
 
+    def warmup(self):
+        with self.lock:
+            if self.request is not None:
+                return False
+            self._load()
+            return True
+
     def extract(self, samples):
         import cv2
         import numpy as np

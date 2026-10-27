@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import { Button, Field, Modal } from './components';
+import { ArucoRegistry } from './aruco-registry';
 
 export function ReplayCalibration({ initial, image, onClose, onSave }) {
   const [zones,setZones]=useState(()=>structuredClone(initial.zones));
   const [association,setAssociation]=useState(initial.association);
+  const [markers,setMarkers]=useState(()=>structuredClone(initial.markers || []));
   const [selected,setSelected]=useState(0), [error,setError]=useState(''), [saving,setSaving]=useState(false);
   const zone=zones[selected];
   function update(change) {setZones(rows=>rows.map((row,i)=>i===selected?{...row,...change}:row));setError('');}
@@ -14,7 +16,7 @@ export function ReplayCalibration({ initial, image, onClose, onSave }) {
   }
   async function save() {
     setSaving(true);setError('');
-    try {await onSave({zones,association});onClose();} catch(failure) {setError(failure.name==='TimeoutError'?'Engine melewati batas waktu. Coba terapkan kembali.':failure.message);} finally {setSaving(false);}
+    try {await onSave({zones,association,markers});onClose();} catch(failure) {setError(failure.name==='TimeoutError'?'Engine melewati batas waktu. Coba terapkan kembali.':failure.message);} finally {setSaving(false);}
   }
   return <Modal title="Kalibrasi workstation replay" description="Tandai area setiap workstation pada frame ini. Perubahan zona memulai pengukuran baru dari posisi video sekarang." onClose={()=>{if(!saving)onClose();}} wide
     footer={<><Button disabled={saving} onClick={onClose}>Batal</Button><Button variant="primary" disabled={saving || zones.some(row=>!row.name.trim() || row.polygon.length<3)} onClick={save}>{saving?'Menyimpan...':'Terapkan zona'}</Button></>}>
@@ -36,7 +38,8 @@ export function ReplayCalibration({ initial, image, onClose, onSave }) {
         <div className="replay-points">{zone.polygon.map(([x,y],index)=><div key={index} className="replay-point"><span>Titik {index+1}</span>{[['X',x],['Y',y]].map(([axis,value],coord)=><Field key={axis} label={`${axis} titik ${index+1} (%)`}><input type="number" min="0" max="100" step="0.1" value={Number((value*100).toFixed(2))} disabled={saving} onChange={e=>update({polygon:zone.polygon.map((p,i)=>i===index?p.map((v,j)=>j===coord?Number(e.target.value)/100:v):p)})}/></Field>)}<Button disabled={saving} aria-label={`Hapus titik ${index+1}`} onClick={()=>update({polygon:zone.polygon.filter((_,i)=>i!==index)})}>Hapus titik</Button></div>)}</div>
         <div className="inline-controls"><Button disabled={saving || zone.polygon.length>=32} onClick={()=>update({polygon:[...zone.polygon,[.5,.5]]})}>Tambah titik</Button><Button disabled={saving || !zone.polygon.length} onClick={()=>update({polygon:zone.polygon.slice(0,-1)})}>Urungkan titik</Button><Button disabled={saving} onClick={()=>{setZones(rows=>rows.filter((_,i)=>i!==selected));setSelected(0);}}>Hapus workstation</Button></div>
       </>:<p className="caption">Belum ada zona. Tambahkan workstation, lalu tandai minimal tiga sudut. Tanpa zona, timer workstation tidak tersedia.</p>}
-      <p className="caption">Kalibrasi disimpan di browser untuk file ini setelah diterima engine. Ini mengukur keterisian area, bukan identitas pegawai atau produktivitas.</p>
+      <ArucoRegistry markers={markers} onChange={setMarkers} disabled={saving}/>
+      <p className="caption">Zona dan daftar marker disimpan di browser untuk file ini. Timer mengukur keterisian area. Check-in mencatat pemilik marker yang terakhir terkonfirmasi.</p>
       {error&&<p className="error-text" role="alert">{error}</p>}
     </div>
   </Modal>;

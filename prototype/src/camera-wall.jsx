@@ -6,6 +6,9 @@ import { WebcamPanel } from './webcam';
 import { CAMERA_MODES, cameraView } from './camera-layout.mjs';
 import { monitoringState } from './camera-status.mjs';
 import './camera-wall.css';
+import { WorkstationOverlay } from './workstation-overlay';
+import { WorkstationResults } from './workstation-replay';
+import { useVideoFullscreen, FullscreenControls } from './video-fullscreen';
 
 const LAYOUTS = [1, 4, 9, 16];
 const HEALTH = { ONLINE: 'Live', CONNECTING: 'Menghubungkan', RECONNECTING: 'Menghubungkan ulang', STALLED: 'Frame terhenti', PAUSED: 'Preview dijeda', OFFLINE: 'Tidak terhubung' };
@@ -53,10 +56,11 @@ function useCameraRegistry(visibleIds) {
   return { cameras, error, add, remove };
 }
 
-function RtspTile({ camera, visible, onFocus, latest, zones = [], showDetections, showZones }) {
+function RtspTile({ camera, visible, onFocus, latest, zones = [], showDetections, showZones,workstations=[],onCalibrate }) {
   const latestRef = useRef(latest); latestRef.current = latest;
   const [frame, setFrame] = useState(null), [size, setSize] = useState(null), [dimensions, setDimensions] = useState(null), [bounds, setBounds] = useState(null);
   const frameArea = useRef(null);
+  const fullscreen=useVideoFullscreen(frameArea,Boolean(frame));
   useEffect(() => {
     if (!dimensions || !frameArea.current || !visible) { setBounds(null); return; }
     const area = frameArea.current;
@@ -108,14 +112,13 @@ function RtspTile({ camera, visible, onFocus, latest, zones = [], showDetections
     && frame.mappingVersion === String(frameAnalysis?.mapping_version));
   const detection = frame && frameMatches && visible && camera.analysis && health === 'ONLINE' ? frameAnalysis : null;
   return <section className="rtsp-wall-panel">
-    <header className="camera-tile-heading"><h2>{camera.name}</h2><Status value={health === 'PAUSED' ? 'DISABLED' : health === 'STALLED' ? 'DEGRADED' : health} label={HEALTH[health] || health}/><Button icon={Maximize} aria-label={`Fokus ${camera.name}`} onClick={onFocus}/></header>
-    <div className="camera-frame" ref={frameArea}>
+    <header className="camera-tile-heading"><h2>{camera.name}</h2><Status value={health === 'PAUSED' ? 'DISABLED' : health === 'STALLED' ? 'DEGRADED' : health} label={HEALTH[health] || health}/><Button disabled={!frame} onClick={onCalibrate}>Atur area</Button><Button icon={Maximize} disabled={!frame} aria-label={`Fullscreen ${camera.name}`} onClick={()=>fullscreen.toggle().catch(()=>{})}/><Button icon={Maximize} aria-label={`Fokus ${camera.name}`} onClick={onFocus}/></header>
+    <div className="camera-frame live-video-frame" ref={frameArea} onPointerMove={fullscreen.wake} onFocusCapture={fullscreen.wake} onDoubleClick={e=>{e.stopPropagation();if(frame)fullscreen.toggle().catch(()=>{});}}>
       {frame ? <><img src={frame.url} alt={`Preview ${camera.name}`} aria-label={camera.id === 'engine-rtsp' || camera.source === 'RTSP_ENGINE' ? 'Preview RTSP lokal' : `Preview ${camera.name}`} onLoad={e => { const width = e.currentTarget.naturalWidth, height = e.currentTarget.naturalHeight; setSize(`${width} × ${height}`); setDimensions(current => current?.width === width && current?.height === height ? current : { width, height }); }} onError={() => { setFrame(null); setSize(null); }}/>
         {bounds && <svg className="rtsp-camera-overlays" style={bounds} viewBox={`0 0 ${dimensions.width} ${dimensions.height}`} preserveAspectRatio="none" aria-label={detection ? `${detection.count} orang terdeteksi` : 'Overlay kamera'}>
-          {showZones && camera.analysis && zones.map(zone => <polygon key={zone.id} points={zone.polygon.map(([x, y]) => `${x * dimensions.width},${y * dimensions.height}`).join(' ')} className="rtsp-zone-outline"/>)}
           {showDetections && detection?.detections.map((row, i) => <g key={row.session_id || row.track_lifecycle || row.track_id || i} data-testid="rtsp-person-detection">
             <rect x={row.box[0] * dimensions.width} y={row.box[1] * dimensions.height} width={(row.box[2] - row.box[0]) * dimensions.width} height={(row.box[3] - row.box[1]) * dimensions.height} className="person-box"/>
-            <text x={row.box[0] * dimensions.width + 4} y={Math.max(14, row.box[1] * dimensions.height - 5)}>Orang {Math.round(row.confidence * 100)}%</text>
+            <text style={{fontSize:11*dimensions.width/bounds.width}} x={row.box[0] * dimensions.width + 4} y={Math.max(14, row.box[1] * dimensions.height - 5)}>Orang {Math.round(row.confidence * 100)}%</text>
             {row.workstation_times?.map((visit, j) => {
               const font = Math.max(12, 11 * dimensions.width / Math.max(1, bounds.width));
               const x = Math.max(0, Math.min(row.box[0] * dimensions.width + 4, dimensions.width - font * 11));
@@ -129,8 +132,12 @@ function RtspTile({ camera, visible, onFocus, latest, zones = [], showDetections
               </g>;
             })}
           </g>)}
-        </svg>}</>
+        </svg>}
+        {showZones&&bounds&&<div className="live-area-layer" style={bounds}><WorkstationOverlay basis="live" zones={zones} rows={workstations} dimensions={dimensions} frameSize={bounds} formatTime={value=>durationClock(value*1e6)} fresh={Boolean(detection)} playing={Boolean(detection)} enabled={Boolean(detection)}/></div>}
+        {frame.time&&<span className="replay-frame-time" style={{right:bounds?bounds.left+6:6,bottom:(bounds?.top||0)+(fullscreen.active&&fullscreen.visible?58:6)}}>{new Date(Number(frame.time)).toLocaleTimeString('id-ID',{timeZone:camera.timezone})}</span>}
+        </>
         : <div className="camera-no-signal"><Camera size={24} aria-hidden="true"/><strong>{HEALTH[health] || 'Menunggu gambar'}</strong><p>{camera.error || 'Gambar muncul setelah koneksi kamera tersedia.'}</p></div>}
+      <FullscreenControls controller={fullscreen} name={camera.name}/>
     </div>
     <div className="camera-tile-info"><span data-testid="rtsp-detection-status">{camera.analysis ? detection ? `${detection.count} orang terdeteksi · ${detection.inference_ms} ms` : 'Menunggu hasil deteksi' : 'Preview saja'}</span><span>{size || 'Resolusi belum tersedia'}</span></div>
     <footer className="camera-tile-footer"><span>{camera.analysis ? camera.recorded ? 'Pencatatan live aktif' : 'Pencatatan belum dimulai' : 'Deteksi dan pencatatan belum aktif'}</span><time>{frame?.time ? new Date(Number(frame.time)).toLocaleTimeString('id-ID', { timeZone: camera.timezone }) : 'Waktu frame belum tersedia'}</time></footer>
@@ -158,6 +165,10 @@ export function CameraWorkspace({ webcam, live, engine, page, onHealthChange, se
   const layout = !prefs.layoutChosen && enabled.length <= 1 ? 1 : prefs.layout;
   const { displayed, primaryId, capacity: count, pages, currentPage } = cameraView(narrow ? enabled.filter(c=>c.id===(enabled.some(c=>c.id===selected)?selected:enabled[0]?.id)) : enabled, { mode: narrow ? 'grid' : prefs.mode, layout: narrow ? 1 : layout, selected, page: narrow ? 0 : prefs.mode === 'focus' ? focusPage : gridPage });
   const selectedCamera = sources.find(c => c.id === selected);
+  const areaProfile=selected==='webcam'?webcam.calibration:live.state?.calibrations?.RTSP_LIVE?.camera_key===selectedCamera?.camera_key?live.state.calibrations.RTSP_LIVE:null;
+  const selectedSession=selected==='webcam'?Boolean(webcam.calibration&&live.state?.source==='WEBCAM_LIVE'&&live.state.camera_key===webcam.calibration.camera_key):Boolean(selectedCamera?.camera_key&&selectedCamera.camera_key===live.state?.camera_key);
+  const areaRows=selectedSession?live.state?.workstations||[]:[];
+  const areaFresh=Boolean(selectedSession&&live.active&&!live.state?.preview_only&&live.state?.latest&&live.state.camera_health==='ONLINE');
   const selectedMonitoring = selectedCamera ? monitoringState(selectedCamera,live) : null;
   const switchingBlocked = live.active && !live.state?.preview_only && (selected === 'webcam' ? live.state.source !== 'WEBCAM_LIVE' : selectedCamera?.camera_key !== live.state.camera_key);
   const showList = prefs.list && prefs.mode !== 'wall';
@@ -231,7 +242,7 @@ export function CameraWorkspace({ webcam, live, engine, page, onHealthChange, se
             return <div key={camera.id} className={`camera-tile ${shown ? '' : 'camera-tile-hidden'} ${selected === camera.id ? 'camera-tile-selected' : ''} ${primaryId === camera.id ? 'camera-tile-primary' : ''}`} style={{ order: displayed.findIndex(c => c.id === camera.id) }} data-testid="camera-tile" data-camera-id={camera.id} data-primary={primaryId === camera.id ? 'true' : undefined} tabIndex={shown ? 0 : -1} aria-label={`Kamera ${camera.name}`} onClick={() => choose(camera.id)} onDoubleClick={e => { if (!e.target.closest('button,select,input')) focusCamera(camera.id); }} onKeyDown={e => { if (e.target === e.currentTarget && e.key === 'Enter') { e.preventDefault(); focusCamera(camera.id); } }}>
               <div className="camera-monitoring-state"><Status value={monitoringState(camera,live).tone} label={monitoringState(camera,live).label}/></div>
               {camera.id === 'webcam' ? <WebcamPanel wall webcam={{ ...webcam, showDetections: prefs.detections, showZones: prefs.zones }} onFocus={() => focusCamera(camera.id)}/>
-                : <RtspTile camera={camera} visible={tileVisible} latest={camera.analysis ? live.state?.latest : null} zones={camera.analysis ? live.state?.calibrations?.RTSP_LIVE?.zones : undefined} showDetections={prefs.detections} showZones={prefs.zones} onFocus={() => focusCamera(camera.id)}/>}
+                : <RtspTile camera={camera} visible={tileVisible} latest={camera.analysis ? live.state?.latest : null} zones={camera.camera_key===live.state?.calibrations?.RTSP_LIVE?.camera_key?live.state.calibrations.RTSP_LIVE.zones:[]} workstations={camera.camera_key===live.state?.camera_key?live.state?.workstations||[]:[]} onCalibrate={()=>onConfigure(camera,true)} showDetections={prefs.detections} showZones={prefs.zones} onFocus={() => focusCamera(camera.id)}/>}
             </div>;
           })}
           {slots.filter(c => !c).map((_, i) => <button key={`empty-${i}`} className="camera-empty-tile" style={{ order: displayed.length + i }} data-testid="camera-empty-slot" onClick={() => setDialog({ type: 'add' })}><Plus size={20} aria-hidden="true"/><strong>Tambah kamera</strong><span>Hubungkan sumber RTSP</span></button>)}
@@ -240,6 +251,7 @@ export function CameraWorkspace({ webcam, live, engine, page, onHealthChange, se
       </div>
     </div>
     <div className="camera-selection-bar"><div><span>KAMERA DIPILIH</span><strong>{selectedCamera?.name || 'Pilih kamera'}</strong></div><p>{selectedMonitoring?.label}. {switchingBlocked?'Satu kamera sedang dianalisis. Hentikan sesi aktif sebelum mengganti sumber pencatatan.':'Atur zona dan mulai monitoring untuk mencatat durasi kamera ini.'}</p><Button disabled={!selectedCamera||switchingBlocked} onClick={()=>onConfigure(selectedCamera)}>{selectedMonitoring?.label==='Monitoring aktif'?'Lihat monitoring':'Atur monitoring'}</Button><Button disabled={!selectedCamera} onClick={() => focusCamera(selected)}>Fokus kamera</Button><Button disabled={!selectedCamera || hidden.includes(selected)} onClick={() => setHidden(h => [...h, selected])}>Sembunyikan dari grid</Button></div>
+    {selectedCamera&&<div className="live-area-results"><WorkstationResults liveMode rows={areaRows} zones={areaProfile?.zones||[]} calibrated={Boolean(areaProfile)} formatTime={value=>durationClock(value*1e6)} fresh={areaFresh} playing={areaFresh} enabled={areaFresh} ready={!live.busy&&!switchingBlocked&&selectedCamera.health==='ONLINE'} onCalibrate={()=>onConfigure(selectedCamera,true)} aruco={selectedSession?live.state?.latest?.aruco:null}/></div>}
     {(notice || registry.error) && <p className="camera-wall-notice" role="status">{notice || `Daftar RTSP belum tersedia: ${registry.error}`}</p>}
     <p className="camera-analysis-note">Beberapa preview dapat ditampilkan bersamaan. Analisis durasi saat ini memproses satu kamera aktif; status deteksi ditampilkan per kamera.</p>
     {dialog?.type === 'add' && <AddCameraDialog onClose={() => setDialog(null)} onSave={async (name, url) => { const camera = await registry.add(name, url); setDialog(null); setHidden(h => h.filter(id => id !== camera.id)); setSelected(camera.id); setFocusPage(0); setGridPage(Math.floor(enabled.length / prefs.layout)); if(!live.active)onConfigure(camera); }}/>}

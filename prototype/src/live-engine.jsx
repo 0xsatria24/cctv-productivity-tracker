@@ -4,6 +4,8 @@ import { engineRequest, seconds } from './engine-client';
 import { validPolygon } from './domain';
 import { Check } from 'lucide-react';
 import { monitoringText, reasonText } from './operations-domain.mjs';
+import { AreaCalibration } from './area-calibration';
+import { DEFAULT_WORKSTATION_RULES } from './workstation-engine';
 
 export function useLiveEngine(webcam, engine) {
   const [state, setState] = useState(null), [error, setError] = useState(''), [busy, setBusy] = useState(false), [receivedAt, setReceivedAt] = useState(null);
@@ -57,7 +59,7 @@ export function useLiveEngine(webcam, engine) {
     webcamStarting: !!ownedSession && state?.source === 'WEBCAM_LIVE' && state?.status === 'STARTING' };
 }
 
-export function LiveEnginePanel({ live, webcam, engine, onReports, hidePreview = false, cameras = [], selected = 'webcam', onSelect, onAdd }) {
+export function LiveEnginePanel({ live, webcam, engine, onReports, hidePreview = false, cameras = [], selected = 'webcam', onSelect, onAdd,areaRequest=0 }) {
   const selectedCamera=cameras.find(c=>c.id===selected)||{id:'webcam',name:'Webcam lokal'};
   const camera=live.active?(cameras.find(c=>live.state?.source==='WEBCAM_LIVE'?c.id==='webcam':c.camera_key===live.state?.camera_key)||selectedCamera):selectedCamera;
   const source=camera.id==='webcam'?'WEBCAM_LIVE':'RTSP_LIVE';
@@ -102,7 +104,7 @@ export function LiveEnginePanel({ live, webcam, engine, onReports, hidePreview =
       canvas.getContext('2d').drawImage(element, 0, 0, w, h);
       const frame = canvas.toDataURL('image/jpeg', 0.8);
       if (live.active) await stopAndWait();
-      setCalibration({ frame, width: w, height: h, camera_key: key, source, profile: validProfile ? profile : null });
+      setCalibration({ frame, width: w, height: h, camera_key: key, source, profile: validProfile ? profile : null,rules:live.state?.workstation_policy?.rules });
     } catch (failure) { setNotice(failure.message); }
   }
   async function begin() {
@@ -110,11 +112,20 @@ export function LiveEnginePanel({ live, webcam, engine, onReports, hidePreview =
     try {
       if (!validProfile) throw new Error('Atur dan simpan zona untuk kamera ini terlebih dahulu.');
       if (live.active && live.state?.preview_only) await stopAndWait();
+      if(profile.analysis_mode!=='workstation')await live.action('calibration',{
+        source,width:profile.width,height:profile.height,camera_key:profile.camera_key,zones:profile.zones,
+        rules:profile.rules,position:profile.position,markers:profile.markers||[],analysis_mode:'workstation',
+      });
       await live.start(source, null, false, source==='RTSP_LIVE'?camera.id:undefined); engine.toast('Sesi monitoring dimulai. Menunggu konfirmasi observasi zona.');
     } catch (failure) { setNotice(failure.message); }
   }
+  useEffect(()=>{
+    if(!areaRequest)return;
+    if(connected)calibrate();
+    else {setStep(2);setNotice('Hubungkan kamera terlebih dahulu, lalu klik Atur area pada preview.');}
+  },[areaRequest]);
   const completed = [true, connected, validProfile, recording];
-  const steps = ['Pilih kamera', 'Cek koneksi', 'Atur zona', 'Mulai monitoring'];
+  const steps = ['Pilih kamera', 'Cek koneksi', 'Atur area', 'Mulai monitoring'];
   return <Panel title="Setup monitoring" caption="Ikuti langkah berikut untuk menghasilkan catatan workstation." className="live-engine-panel setup-panel" action={<Status value={recording && live.state?.camera_health === 'ONLINE' ? 'ONLINE' : live.state?.status === 'FAILED' ? 'OFFLINE' : 'DISABLED'} label={monitoringText(live.state, live.error)}/>}>
     <ol className="setup-progress">{steps.map((label, i) => <li key={label}><button type="button" aria-current={step === i + 1 ? 'step' : undefined} disabled={recording && i < 3} onClick={() => setStep(i + 1)}><span>{completed[i] && i > 0 ? <Check size={14}/> : i + 1}</span><strong>{label}</strong><small>{i === 0 ? source === 'WEBCAM_LIVE' ? 'Webcam lokal' : 'Kamera RTSP' : completed[i] ? 'Selesai' : 'Belum selesai'}</small></button></li>)}</ol>
     <div className="setup-step-content" aria-busy={working}>
@@ -125,14 +136,26 @@ export function LiveEnginePanel({ live, webcam, engine, onReports, hidePreview =
       {(notice || live.error || sourceError) && <p role="alert" className="error-text">{notice || live.error || sourceError}</p>}
       {live.state?.run_id && <p className="caption">Sesi {live.state.run_id.slice(0, 8)} · {live.state.processed} observasi tersimpan. Video tidak direkam.</p>}
     </div>
-    {live.state?.latest?.zones && <div className="live-zone-states">{live.state.latest.zones.map(z => <div key={z.id}><strong>{z.name}</strong><Status value={z.state}/><span>{z.count == null ? 'Jumlah belum dapat dipastikan' : `${z.count} orang teramati`} · {seconds(z.evidence_until_utc_us - z.state_since_utc_us)} pada status ini</span>{z.reason && <small>{reasonText(z.reason)}</small>}</div>)}</div>}
+    {live.state?.latest?.analysis_mode==='person'&&live.state?.latest?.zones && <div className="live-zone-states">{live.state.latest.zones.map(z => <div key={z.id}><strong>{z.name}</strong><Status value={z.state}/><span>{z.count == null ? 'Jumlah belum dapat dipastikan' : `${z.count} orang teramati`} · {seconds(z.evidence_until_utc_us - z.state_since_utc_us)} pada status ini</span>{z.reason && <small>{reasonText(z.reason)}</small>}</div>)}</div>}
     {calibration && <CalibrationDialog value={calibration} live={live} onSaved={() => { setCalibration(null); setStep(4); engine.toast('Kalibrasi zona berhasil disimpan untuk kamera ini.'); }} onClose={() => setCalibration(null)}/>}
   </Panel>;
 }
 
 export function CalibrationDialog({ value, live, onClose, onSaved }) {
+  if(value.profile?.position?.mode==='homography')return <AdvancedCalibrationDialog value={value} live={live} onClose={onClose} onSaved={onSaved}/>;
+  const initial={zones:(value.profile?.zones||[]).map(({id,name,polygon})=>({id,name,polygon})),association:value.profile?.position?.mode||'bbox_overlap',markers:value.profile?.markers||[]};
+  return <AreaCalibration liveMode initial={initial} image={{url:value.frame,width:value.width,height:value.height}} onClose={onClose} onSave={async area=>{
+    await live.action('calibration',{source:value.source,width:value.width,height:value.height,camera_key:value.camera_key,
+      analysis_mode:'workstation',markers:area.markers,zones:area.zones.map(z=>({...z,exclusive_group:'workstations'})),
+      rules:value.profile?.rules||value.rules||DEFAULT_WORKSTATION_RULES,
+      position:{mode:area.association}});
+    (onSaved||onClose)();
+  }}/>;
+}
+
+function AdvancedCalibrationDialog({ value, live, onClose, onSaved }) {
   const [zones, setZones] = useState(value.profile?.zones || []), [points, setPoints] = useState([]), [name, setName] = useState(''), [editing, setEditing] = useState(null);
-  const [rules, setRules] = useState(value.profile?.rules || { occupied_confirm_seconds: 2, empty_confirm_seconds: 5, max_evidence_gap_seconds: 3, association_overlap: 0.25, ambiguity_margin: 0.1, strong_confidence: 0.5 });
+  const [rules, setRules] = useState(value.profile?.rules || value.rules || DEFAULT_WORKSTATION_RULES);
   const [error, setError] = useState(''), [coordinate, setCoordinate] = useState({ x: '0.5', y: '0.5' });
   const [position, setPosition] = useState(value.profile?.position || { mode: 'bbox_overlap', image_points: [], floor_width_m: '', floor_depth_m: '', image_boundary_margin: 0.01, floor_boundary_margin_m: 0.1 });
   const [target, setTarget] = useState('zone');
@@ -159,7 +182,7 @@ export function CalibrationDialog({ value, live, onClose, onSaved }) {
     if (points.length || name.trim()) { setError('Simpan atau batalkan zona yang sedang digambar sebelum menyimpan kalibrasi.'); return; }
     if (floorMode && (position.image_points.length !== 4 || !validPolygon(position.image_points) || !(Number(position.floor_width_m) >= 0.1) || !(Number(position.floor_depth_m) >= 0.1))) { setError('Pilih empat sudut lantai berurutan dan isi lebar serta kedalaman nyata dalam meter.'); return; }
     const savedPosition = { ...position, image_points: floorMode ? position.image_points : [], floor_width_m: floorMode ? Number(position.floor_width_m) : null, floor_depth_m: floorMode ? Number(position.floor_depth_m) : null };
-    try { await live.action('calibration', { source: value.source, width: value.width, height: value.height, camera_key: value.camera_key, zones, rules, position: savedPosition }); (onSaved || onClose)(); }
+    try { await live.action('calibration', { source: value.source, width: value.width, height: value.height, camera_key: value.camera_key, zones, rules, position: savedPosition, analysis_mode:'workstation',markers:value.profile?.markers||[] }); (onSaved || onClose)(); }
     catch (failure) { setError(failure.message); }
   }
   return <Modal title="Kalibrasi zona live" description="Frame dibekukan tanpa mirror. Klik titik batas workstation berurutan, simpan zona, lalu simpan kalibrasi. Kalibrasikan ulang jika kamera atau posisinya berubah." wide onClose={onClose}>

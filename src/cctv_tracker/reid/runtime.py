@@ -45,12 +45,15 @@ class ReIdRuntime:
                 from .openvino import OpenVinoExtractor
                 self.extractor = OpenVinoExtractor(self.rules.manifest_path, device=self.rules.device)
             samples, report['rejections'] = make_crops(jpeg, detections, token, self.rules)
+            warmup = getattr(self.extractor, 'warmup', None)
+            initialized = bool(samples and warmup and warmup())
             results = self.extractor.extract(samples)
             validate_batch(results, samples, self.extractor.identity)
             report['elapsed_ms'] = (time.perf_counter()-started)*1000
             if report['elapsed_ms'] > self.rules.max_extra_latency_ms:
-                report['status'] = 'LATENCY_BUDGET'
-                staged['disable'] = True
+                # Discard cold-start results; only steady-state overruns disable ReID.
+                report['status'] = 'WARMUP_BUDGET' if initialized else 'LATENCY_BUDGET'
+                staged['disable'] = not initialized
                 return staged
             staged['sampled'] = True
             queries, candidates, allowed = {}, {}, set()

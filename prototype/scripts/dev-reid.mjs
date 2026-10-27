@@ -7,17 +7,18 @@ const prototype = fileURLToPath(new URL('..', import.meta.url));
 const root = path.resolve(prototype, '..');
 const python = path.join(root, '.venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
 const manifest = path.join(root, 'models/reid/person-reidentification-retail-0287/manifest.json');
-if (!existsSync(python) || !existsSync(manifest)) {
+const workstationMode = process.argv.includes('--workstation');
+if (!existsSync(python) || (!workstationMode && !existsSync(manifest))) {
   console.error('Siapkan .venv dan jalankan .venv/Scripts/python.exe scripts/setup_reid_model.py dari root project.');
   process.exit(1);
 }
-const output = path.join(root, 'runtime/reid-demo');
+const output = path.join(root, workstationMode ? 'runtime/workstation-demo' : 'runtime/reid-demo');
 const enginePort = '8770', uiPort = '5174';
 mkdirSync(output, { recursive: true });
 const config = JSON.parse(readFileSync(path.join(root, 'config/pilot.example.json'), 'utf8'));
 config.database = path.join(output, 'dashboard.sqlite3');
 config.sessions.recovery_confirmation_window_seconds = 2;
-config.reid = { mode: 'active', recovery_policy: 'short_occlusion', manifest_path: manifest, device: 'CPU',
+config.reid = workstationMode ? {mode:'off'} : { mode: 'active', recovery_policy: 'short_occlusion', manifest_path: manifest, device: 'CPU',
   sample_interval_seconds: .2, confirm_seconds: .4, min_confidence: .55, max_gap_seconds: 2, max_extra_latency_ms: 5000 };
 const configPath = path.join(output, 'settings.json');
 writeFileSync(configPath, JSON.stringify(config, null, 2));
@@ -38,7 +39,7 @@ function launch(command, args, cwd, env = process.env) {
 }
 process.on('SIGINT', () => stop());
 process.on('SIGTERM', () => stop());
-console.log(`ReID aktif (eksperimental): http://localhost:${uiPort}/ · database terpisah di runtime/reid-demo`);
+console.log(`${workstationMode ? 'Workstation + check-in ArUco' : 'ReID aktif (eksperimental)'}: http://localhost:${uiPort}/ · database: ${output}`);
 launch(python, ['-m', 'cctv_tracker', '--config', configPath, '--log-dir', path.join(output, 'logs'),
   'dashboard', '--port', enginePort, '--detector', 'yolox-openvino', '--openvino-device', 'GPU'], root);
 launch(process.execPath, [path.join(prototype, 'node_modules/vite/bin/vite.js'), '--host', '127.0.0.1', '--port', uiPort, '--strictPort'], prototype,

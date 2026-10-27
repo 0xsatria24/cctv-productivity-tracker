@@ -44,3 +44,37 @@ def test_replay_calibration_auth_revision_limits_and_accounting_isolation(tmp_pa
         assert client.get('/pilot/v1/replay/invalid/calibration',headers=headers).status_code==422
     with closing(Database(path,migrate=False)) as db:
         assert {name:db.conn.execute(f'SELECT COUNT(*) FROM {name}').fetchone()[0] for name in before}==before
+
+
+def test_workstation_aruco_api_reads_generated_marker_and_keeps_accounting_isolated(tmp_path, monkeypatch):
+    from cctv_tracker.aruco import marker_png
+    from cctv_tracker.webcam import WebcamDetector
+    monkeypatch.setattr(WebcamDetector,'detect',lambda self,data:{'detections':[{'box':[.2,.2,.8,.8],'confidence':.95}],'count':1,'inference_ms':1})
+    path=tmp_path/'aruco.sqlite3'
+    with closing(Database(path)):
+        pass
+    token, rid='t'*32,str(uuid4())
+    headers={'Authorization':'Bearer '+token}
+    with TestClient(create_app(path,token,controller=ReplayController(Settings(database=path)))) as client:
+        assert client.get('/pilot/v1/aruco/7.png').status_code == 401
+        assert client.get('/pilot/v1/aruco/50.png',headers=headers).status_code == 422
+        downloaded=client.get('/pilot/v1/aruco/7.png',headers=headers)
+        assert downloaded.status_code==200 and downloaded.headers['content-type']=='image/png'
+        image=cv2.imdecode(np.frombuffer(downloaded.content,np.uint8),0)
+        jpeg=cv2.imencode('.jpg',image)[1].tobytes()
+        values={'expected_revision':0,'association':'bbox_overlap','zones':[{'id':'desk','name':'Meja','polygon':[[0,0],[1,0],[1,1],[0,1]]}],
+                'markers':[{'marker_id':7,'label':'Pekerja A'}]}
+        url=f'/pilot/v1/replay/{rid}/calibration'
+        assert client.put(url,json=values,headers=headers).status_code==200
+        assert client.get(url,headers=headers).json()['markers']==values['markers']
+        for seq in range(1,9):
+            response=client.post('/pilot/v1/replay/frame',content=jpeg,headers={**headers,'Content-Type':'image/jpeg',
+                'X-Replay-Id':rid,'X-Replay-Generation':'0','X-Replay-Sequence':str(seq),'X-Replay-Time':str((seq-1)*.5),
+                'X-Replay-Calibration':'1','X-Replay-Analysis':'workstation'})
+            assert response.status_code==200,response.text
+        packet=response.json()
+        assert packet['aruco']['markers'][0]['marker_id']==7
+        assert packet['workstations'][0]['checkin']['registered']['label']=='Pekerja A'
+        assert not packet['tracking_supported'] and not packet['duration_accounting']
+    with closing(Database(path,migrate=False)) as db:
+        assert db.conn.execute('SELECT COUNT(*) FROM person_sessions').fetchone()[0]==0

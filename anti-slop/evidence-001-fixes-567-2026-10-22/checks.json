@@ -1,0 +1,219 @@
+[
+  {
+    "name": "first-run setup and mobile single view",
+    "pass": true,
+    "evidence": {
+      "emptySlots": 0,
+      "grid": {
+        "scroll": 341,
+        "width": 341
+      },
+      "nav": [
+        {
+          "left": 12,
+          "right": 126,
+          "text": "Ringkasan"
+        },
+        {
+          "left": 130,
+          "right": 244,
+          "text": "Pemantauan Live"
+        },
+        {
+          "left": 248,
+          "right": 362,
+          "text": "Workstation"
+        },
+        {
+          "left": 12,
+          "right": 126,
+          "text": "Laporan"
+        },
+        {
+          "left": 130,
+          "right": 244,
+          "text": "Pengaturan"
+        }
+      ],
+      "setupTop": 211,
+      "width": 390
+    }
+  },
+  {
+    "name": "registered camera reused without URL entry",
+    "pass": true
+  },
+  {
+    "name": "one report context across four tabs",
+    "pass": true,
+    "evidence": {
+      "before": {
+        "filters": [
+          "LATEST",
+          "0101882c-6678-5e7b-a872-6c400135dafd",
+          "session"
+        ],
+        "range": "Zona waktu: Asia/Jakarta12 Okt 2026, 09.00.00 sampai 12 Okt 2026, 09.00.17",
+        "source": "replay"
+      },
+      "after": [
+        {
+          "filters": [
+            "LATEST",
+            "0101882c-6678-5e7b-a872-6c400135dafd",
+            "session"
+          ],
+          "panels": 1,
+          "range": "Zona waktu: Asia/Jakarta12 Okt 2026, 09.00.00 sampai 12 Okt 2026, 09.00.17",
+          "source": "replay",
+          "tab": "Rekap Harian"
+        },
+        {
+          "filters": [
+            "LATEST",
+            "0101882c-6678-5e7b-a872-6c400135dafd",
+            "session"
+          ],
+          "panels": 1,
+          "range": "Zona waktu: Asia/Jakarta12 Okt 2026, 09.00.00 sampai 12 Okt 2026, 09.00.17",
+          "source": "replay",
+          "tab": "Timeline"
+        },
+        {
+          "filters": [
+            "LATEST",
+            "0101882c-6678-5e7b-a872-6c400135dafd",
+            "session"
+          ],
+          "panels": 1,
+          "range": "Zona waktu: Asia/Jakarta12 Okt 2026, 09.00.00 sampai 12 Okt 2026, 09.00.17",
+          "source": "replay",
+          "tab": "Ekspor"
+        },
+        {
+          "filters": [
+            "LATEST",
+            "0101882c-6678-5e7b-a872-6c400135dafd",
+            "session"
+          ],
+          "panels": 1,
+          "range": "Zona waktu: Asia/Jakarta12 Okt 2026, 09.00.00 sampai 12 Okt 2026, 09.00.17",
+          "source": "replay",
+          "tab": "Ringkasan"
+        }
+      ]
+    }
+  },
+  {
+    "name": "legacy reports opens unified export",
+    "pass": true
+  },
+  {
+    "name": "unified CSV export produces download",
+    "pass": true
+  },
+  {
+    "name": "mobile single camera preserves desktop density",
+    "pass": true,
+    "evidence": {
+      "phoneGrid": {
+        "gridScroll": 341,
+        "gridWidth": 341,
+        "layout": "1",
+        "width": 390
+      },
+      "desktopGrid": "9"
+    }
+  },
+  {
+    "name": "overview contains current state without report filters",
+    "pass": true
+  },
+  {
+    "name": "runtime and replay diagnostics reachable in settings",
+    "pass": true
+  },
+  {
+    "name": "explicit desktop grid survives reopening",
+    "pass": true
+  },
+  {
+    "name": "configuration source remains explicit",
+    "pass": true
+  },
+  {
+    "name": "prototype shares period and workstation across four tabs",
+    "pass": true,
+    "evidence": {
+      "before": {
+        "fields": [
+          "WEEK",
+          "2026-10-06",
+          "2026-10-12",
+          "WS-01",
+          "DAY",
+          "EXACT"
+        ],
+        "range": "DATA SIMULASI2026-10-06 s.d. 2026-10-12Asia/JakartaInterval detail (mock)Periode sementara"
+      },
+      "after": [
+        {
+          "fields": [
+            "WEEK",
+            "2026-10-06",
+            "2026-10-12",
+            "WS-01",
+            "DAY",
+            "EXACT"
+          ],
+          "panels": 1,
+          "range": "DATA SIMULASI2026-10-06 s.d. 2026-10-12Asia/JakartaInterval detail (mock)Periode sementara"
+        },
+        {
+          "fields": [
+            "WEEK",
+            "2026-10-06",
+            "2026-10-12",
+            "WS-01",
+            "DAY",
+            "EXACT"
+          ],
+          "panels": 1,
+          "range": "DATA SIMULASI2026-10-06 s.d. 2026-10-12Asia/JakartaInterval detail (mock)Periode sementara"
+        },
+        {
+          "fields": [
+            "WEEK",
+            "2026-10-06",
+            "2026-10-12",
+            "WS-01",
+            "DAY",
+            "EXACT"
+          ],
+          "panels": 1,
+          "range": "DATA SIMULASI2026-10-06 s.d. 2026-10-12Asia/JakartaInterval detail (mock)Periode sementara"
+        },
+        {
+          "fields": [
+            "WEEK",
+            "2026-10-06",
+            "2026-10-12",
+            "WS-01",
+            "DAY",
+            "EXACT"
+          ],
+          "panels": 1,
+          "range": "DATA SIMULASI2026-10-06 s.d. 2026-10-12Asia/JakartaInterval detail (mock)Periode sementara"
+        }
+      ]
+    }
+  },
+  {
+    "name": "prototype simulation controls accessible in diagnostics",
+    "pass": true
+  },
+  {
+    "name": "responsive engine and prototype layouts",
+    "pass": true
+  }
+]

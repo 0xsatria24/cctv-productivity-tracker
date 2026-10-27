@@ -17,6 +17,7 @@ from starlette.concurrency import run_in_threadpool
 
 from .persistence import Database
 from .dashboard import snapshot, report as dashboard_report
+from .workstation_engine import DEFAULT_WORKSTATION_RULES, workstation_policy
 
 
 class EmployeeInput(BaseModel):
@@ -42,12 +43,12 @@ class LiveZoneInput(BaseModel):
 
 class LiveRulesInput(BaseModel):
     model_config = ConfigDict(extra='forbid', allow_inf_nan=False)
-    occupied_confirm_seconds: float = Field(default=2, ge=0.1, le=60)
-    empty_confirm_seconds: float = Field(default=5, ge=0.1, le=120)
-    max_evidence_gap_seconds: float = Field(default=3, ge=0.5, le=10)
-    association_overlap: float = Field(default=0.25, gt=0, le=1)
-    ambiguity_margin: float = Field(default=0.1, gt=0, le=1)
-    strong_confidence: float = Field(default=0.5, gt=0, le=1)
+    occupied_confirm_seconds: float = Field(default=DEFAULT_WORKSTATION_RULES.occupied_confirm_seconds, ge=0.1, le=60)
+    empty_confirm_seconds: float = Field(default=DEFAULT_WORKSTATION_RULES.empty_confirm_seconds, ge=0.1, le=120)
+    max_evidence_gap_seconds: float = Field(default=DEFAULT_WORKSTATION_RULES.max_evidence_gap_seconds, ge=0.5, le=10)
+    association_overlap: float = Field(default=DEFAULT_WORKSTATION_RULES.association_overlap, gt=0, le=1)
+    ambiguity_margin: float = Field(default=DEFAULT_WORKSTATION_RULES.ambiguity_margin, gt=0, le=1)
+    strong_confidence: float = Field(default=DEFAULT_WORKSTATION_RULES.strong_confidence, gt=0, le=1)
 
 
 class PositionInput(BaseModel):
@@ -69,6 +70,8 @@ class CalibrationInput(BaseModel):
     rules: LiveRulesInput
     camera_key: str = Field(min_length=64, max_length=64)
     position: PositionInput | None = None
+    analysis_mode: Literal['workstation', 'person'] = 'person'
+    markers: list[dict] = Field(default_factory=list, max_length=50)
 
 
 class LiveStartInput(BaseModel):
@@ -118,6 +121,7 @@ def create_app(database: Path, token: str, *, controller=None, ui_dir: Path | No
             if controller:
                 controller.shutdown()
             scheduler.close()
+            await run_in_threadpool(replay_tracking.flush)
 
     app = FastAPI(title="CCTV local pilot API", version="0.2.0", docs_url=None, redoc_url=None, lifespan=lifespan)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", *([] if ui_dir else ["testserver"])])
@@ -132,7 +136,8 @@ def create_app(database: Path, token: str, *, controller=None, ui_dir: Path | No
     legacy_replay_detector = scheduler.bind('replay:stateless', max_fps=5)
     app.state.inference_scheduler = scheduler
     from .replay_tracking import ReplayConflict, ReplayFrame, ReplayTracking
-    replay_tracking = ReplayTracking(controller.settings if controller and hasattr(controller, 'settings') else None)
+    replay_tracking = ReplayTracking(controller.settings if controller and hasattr(controller, 'settings') else None,
+                                     background_reid=True, state_dir=database.parent / 'replay-state')
     live = create_live_engine(controller.settings, scheduler.bind('live:' + controller.settings.camera_id, max_fps=controller.settings.inference_fps)) if controller and hasattr(controller, 'settings') else None
     from .camera_wall import CameraWall
     camera_wall = CameraWall(controller.settings) if live else None
@@ -144,8 +149,12 @@ def create_app(database: Path, token: str, *, controller=None, ui_dir: Path | No
             return live.settings.database
         return database
 
+    def session_cookie(request):
+        # Cookies share a host across ports; separate local dashboard instances.
+        return f"cctv_session_{request.url.port or (443 if request.url.scheme == 'https' else 80)}"
+
     def authenticate(request: Request, credentials: HTTPAuthorizationCredentials | None = Depends(bearer)):
-        supplied = credentials.credentials if credentials else request.cookies.get("cctv_session", "") if ui_dir else ""
+        supplied = credentials.credentials if credentials else request.cookies.get(session_cookie(request), "") if ui_dir else ""
         if not supplied or not secrets.compare_digest(supplied, token):
             raise HTTPException(status_code=401, detail="Unauthorized")
         if request.method not in {"GET", "HEAD"}:
@@ -180,9 +189,20 @@ def create_app(database: Path, token: str, *, controller=None, ui_dir: Path | No
         return {'available': controller is not None, 'source': 'LOCAL_VIDEO_REPLAY',
                 'recorded': False, 'tracking_supported': True, 'duration_accounting': False,
                 'workstation_calibration': True,
+                'workstation_analysis': True, 'aruco_dictionary': 'DICT_4X4_50',
+                'workstation_policy': workstation_policy(replay_tracking.settings),
                 'reid': {'mode': replay_tracking.settings.reid.mode,
                          'configured': replay_tracking.settings.reid.mode != 'off',
                          'recovery_policy': replay_tracking.settings.reid.recovery_policy}}
+
+    @app.get('/pilot/v1/aruco/{marker_id}.png', dependencies=[Depends(authenticate)])
+    def aruco_marker(marker_id: int):
+        from .aruco import marker_png
+        try:
+            return Response(marker_png(marker_id), media_type='image/png', headers={
+                'Content-Disposition': f'attachment; filename="aruco-4x4-50-{marker_id}.png"'})
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from None
 
     @app.get('/pilot/v1/replay/{replay_id}/calibration', dependencies=[Depends(authenticate)])
     def get_replay_calibration(replay_id: str):
@@ -193,6 +213,15 @@ def create_app(database: Path, token: str, *, controller=None, ui_dir: Path | No
         except ValueError:
             raise HTTPException(status_code=422, detail='ID replay tidak valid') from None
 
+    @app.post('/pilot/v1/replay/{replay_id}/checkpoint', dependencies=[Depends(authenticate)])
+    def replay_checkpoint(replay_id: str):
+        try:
+            return replay_tracking.checkpoint(replay_id)
+        except BlockingIOError as error:
+            raise HTTPException(status_code=429, detail=str(error)) from None
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from None
+
     @app.put('/pilot/v1/replay/{replay_id}/calibration', dependencies=[Depends(authenticate)],
              openapi_extra={'requestBody': {'required': True, 'content': {'application/json': {'schema': {
                  'type': 'object', 'additionalProperties': False,
@@ -200,6 +229,10 @@ def create_app(database: Path, token: str, *, controller=None, ui_dir: Path | No
                  'properties': {
                      'expected_revision': {'type': 'integer', 'minimum': 0, 'maximum': 999999999},
                      'association': {'enum': ['bbox_overlap', 'footpoint']},
+                     'markers': {'type': 'array', 'maxItems': 50, 'items': {
+                         'type': 'object', 'additionalProperties': False, 'required': ['marker_id', 'label'],
+                         'properties': {'marker_id': {'type': 'integer', 'minimum': 0, 'maximum': 49},
+                                        'label': {'type': 'string', 'minLength': 1, 'maxLength': 80}}}},
                      'zones': {'type': 'array', 'maxItems': 16, 'items': {
                          'type': 'object', 'additionalProperties': False, 'required': ['id', 'name', 'polygon'],
                          'properties': {
@@ -246,7 +279,8 @@ def create_app(database: Path, token: str, *, controller=None, ui_dir: Path | No
                 frame = ReplayFrame.from_headers(request.headers)
                 if frame:
                     lane = scheduler.bind('replay:' + frame.replay_id, max_fps=5)
-                    return await run_in_threadpool(replay_tracking.process, lane, bytes(body), frame)
+                    return await run_in_threadpool(replay_tracking.process, lane, bytes(body), frame,
+                                                   request.headers.get('x-replay-analysis', 'person'))
                 result = await run_in_threadpool(legacy_replay_detector.detect, bytes(body))
                 return {**result, 'source': 'LOCAL_VIDEO_REPLAY', 'recorded': False,
                         'tracking_supported': False, 'duration_accounting': False}
@@ -451,7 +485,7 @@ def create_app(database: Path, token: str, *, controller=None, ui_dir: Path | No
                 raise HTTPException(status_code=403, detail="Open the dashboard directly on loopback")
             html = (ui_dir / "index.html").read_text(encoding="utf-8").replace("<head>", "<head><script>window.__CCTV_ENGINE__=true;</script>", 1)
             response = HTMLResponse(html, headers={"Cache-Control": "no-store"})
-            response.set_cookie("cctv_session", token, httponly=True, samesite="strict", path="/pilot/")
+            response.set_cookie(session_cookie(request), token, httponly=True, samesite="strict", path="/pilot/")
             return response
 
     return app

@@ -10,8 +10,12 @@ class TrackingRules:
     lost_buffer_seconds: float = 1.0
     confirmation_frames: int = 1
     max_prediction_steps: int = 30
+    display_prediction_seconds: float = 0.4
 
     def __post_init__(self):
+        value = self.display_prediction_seconds
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not 0 <= value <= 1:
+            raise ValueError('display_prediction_seconds must be in [0,1]')
         for name in ('activation_threshold', 'matching_threshold'):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not 0 < value < 1:

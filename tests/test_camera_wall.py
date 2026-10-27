@@ -126,3 +126,33 @@ def test_live_start_resolves_registered_source_without_exposing_credentials(tmp_
         client.delete(f"/pilot/v1/camera-wall/cameras/{camera['id']}", headers=headers)
         assert client.post('/pilot/v1/live/start', json=request, headers=headers).status_code == 404
         assert len(calls) == 1
+
+
+@pytest.mark.parametrize('first_frame', [False, True])
+def test_alive_but_stalled_decoder_is_closed_and_reconnected(tmp_path, first_frame):
+    class StalledCapture(TestCapture):
+        instances = []
+
+        def __init__(self, url, settings):
+            super().__init__(url, settings)
+            self.sent = False
+
+        def read(self, timeout=.1):
+            time.sleep(.01)
+            if first_frame and not self.sent:
+                self.sent = True
+                return {'jpeg': b'frame', 'monotonic_ns': time.perf_counter_ns(), 'generation': 'g'}
+            return None
+
+    wall = CameraWall(Settings(database=tmp_path/'stall.sqlite3',
+                               open_timeout_seconds=.05, read_timeout_seconds=.05),
+                      capture_factory=StalledCapture, lease_seconds=10)
+    try:
+        camera = wall.add('Stalled source', 'rtsp://localhost/stalled')
+        wall.subscribe('viewer', [camera['id']])
+        wait(lambda: len(StalledCapture.instances) >= 2)
+        assert StalledCapture.instances[0].closed
+        assert wall.frame(camera['id']) is None or first_frame
+    finally:
+        wall.shutdown()
+    assert all(c.closed for c in StalledCapture.instances)

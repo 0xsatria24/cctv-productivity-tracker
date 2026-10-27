@@ -55,6 +55,7 @@ class PersonSession:
     merged_into: str | None = None
     last_observation_strong: bool = True
     last_strong_ns: int | None = None
+    observed_ns: int = 0
 
 
 class SessionManager:
@@ -65,6 +66,7 @@ class SessionManager:
         self.events = []
         self.mapping_version = 0
         self.generation = None
+        self.now_ns = None
         self.metrics = Counter()
         self._velocity_cache = {}
         self.continuation_confidence = continuation_confidence
@@ -245,6 +247,7 @@ class SessionManager:
             return temporary
         bonus = gap if self.rules.count_lost_gap else 0
         old.accumulated_ns += temporary.accumulated_ns + bonus
+        old.observed_ns += temporary.observed_ns
         for alias, previous in old.zones.items():
             if alias not in temporary.zones:
                 previous.observed_inside = False
@@ -266,6 +269,7 @@ class SessionManager:
         # Retire the provisional row atomically; its time now belongs to old.
         temporary.merged_into = old.session_id
         temporary.accumulated_ns = 0
+        temporary.observed_ns = 0
         for zone in temporary.zones.values():
             zone.duration_ns = 0
         self._expire(temporary, 'MERGED')
@@ -298,6 +302,7 @@ class SessionManager:
         return score
 
     def update(self, detections, utc, at, generation, unavailable=None, *, recover=True):
+        self.now_ns = at
         self._velocity_cache.clear()
         changed_generation = self.generation is not None and generation != self.generation
         active = [s for s in self.sessions.values() if s.status == 'ACTIVE']
@@ -338,12 +343,18 @@ class SessionManager:
                 strong = not detection.tracking_only and detection.confidence >= self.settings.rules.strong_confidence
                 delta = at - session.last_ns if strong and session.last_observation_strong else 0
                 session.accumulated_ns += delta
-                self._observe_zones(session, detection, utc, delta)
-                session.last_ns, session.last_seen, session.box = at, utc, detection.box
+                session.observed_ns += delta
+                if strong:
+                    self._observe_zones(session, detection, utc, delta)
+                else:
+                    for zone in session.zones.values():
+                        zone.observed_inside, zone.outside_count = False, 0
+                session.last_ns, session.box = at, detection.box
                 session.history.append((at, detection.box))
                 session.last_observation_strong = strong
                 if strong:
                     session.last_strong_ns = at
+                    session.last_seen = utc
                 else:
                     self._diagnose('weak_continuation_frozen')
                 self._bind(session, detection, generation)
@@ -393,12 +404,18 @@ class SessionManager:
         return [self.snapshot(s) for s in self.dirty.values()]
 
     def snapshot(self, session):
+        at = self.now_ns if self.now_ns is not None else session.last_ns
+        strong_at = session.last_strong_ns if session.last_strong_ns is not None else session.first_ns
         return {'session_id': session.session_id, 'camera_id': session.camera_id, 'generation_id': session.generation,
                 'first_seen_utc_us': session.first_seen, 'last_seen_utc_us': session.last_seen,
+                'observed_duration_us': session.observed_ns // 1000,
+                'total_elapsed_us': max(0, at - session.first_ns) // 1000,
+                'absence_duration_us': max(0, at - strong_at) // 1000,
                 'accumulated_duration_us': session.accumulated_ns // 1000, 'status': session.status,
                 'track_id': session.track_id, 'track_lifecycle': session.track_lifecycle,
                 'mapping_version': self.mapping_version, 'reason': session.reason, 'merged_into': session.merged_into,
-                'matching': {'motion_recoverable': session.recoverable, 'history_samples': len(session.history)},
+                'matching': {'motion_recoverable': session.recoverable, 'history_samples': len(session.history),
+                             'observed_duration_us': session.observed_ns // 1000},
                 'zone_times': {alias: {'first_seen_utc_us': z.first_seen, 'last_seen_utc_us': z.last_seen,
                                       'presence_us': z.duration_ns // 1000, 'inside': z.inside}
                                for alias, z in session.zones.items()}}
@@ -409,5 +426,6 @@ class SessionManager:
 
     def finish(self):
         self.sessions.clear()
+        self.now_ns = None
         self._velocity_cache.clear()
         self.checkpoint()

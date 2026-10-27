@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Maximize, Play, RefreshCw, Settings, Square, Video } from 'lucide-react';
 import { Button, Field, Modal, Panel, Status } from './components';
+import { WorkstationOverlay } from './workstation-overlay';
+import { durationClock } from './engine-client';
+import { useVideoFullscreen, FullscreenControls } from './video-fullscreen';
+import { analysisCaptureSize,workstationIntervalMs,ANALYSIS_JPEG_QUALITY } from './workstation-engine';
 
 const PRESETS = {
   '480': { width: 640, height: 480 },
@@ -137,9 +141,16 @@ export function useWebcamPreview() {
     fit, setFit, start, stop, fail, frame, refreshing, refreshDevices, deviceNotice };
 }
 
-function WebcamVideo({ webcam }) {
-  const video = useRef(null), container = useRef(null), [notice, setNotice] = useState('');
-  const [fullscreen, setFullscreen] = useState(false);
+function WebcamVideo({ webcam,frameRef }) {
+  const video = useRef(null), localContainer = useRef(null), [notice, setNotice] = useState('');
+  const container=frameRef||localContainer;
+  const fullscreenControls=useVideoFullscreen(container,Boolean(webcam.stream)),fullscreen=fullscreenControls.active;
+  const [frameSize,setFrameSize]=useState({width:640,height:360});
+  useEffect(()=>{
+    const observer=new ResizeObserver(([entry])=>{const {width,height}=entry.contentRect;if(width&&height)setFrameSize({width,height});});
+    if(container.current)observer.observe(container.current);
+    return()=>observer.disconnect();
+  },[container]);
   const [analysis, setAnalysis] = useState(null), [engineError, setEngineError] = useState('');
   const [fresh, setFresh] = useState(false);
   useEffect(() => {
@@ -156,9 +167,8 @@ function WebcamVideo({ webcam }) {
         timer = setTimeout(sample, 500); return;
       }
       lastTime = element.currentTime;
-      const scale = Math.min(1, 640 / Math.max(element.videoWidth, element.videoHeight));
-      canvas.width = Math.max(1, Math.round(element.videoWidth * scale));
-      canvas.height = Math.max(1, Math.round(element.videoHeight * scale));
+      const size=analysisCaptureSize(element.videoWidth,element.videoHeight);
+      canvas.width=size.width;canvas.height=size.height;
       const request = new AbortController();
       const stopRequest = () => request.abort();
       abort.signal.addEventListener('abort', stopRequest, { once: true });
@@ -166,7 +176,7 @@ function WebcamVideo({ webcam }) {
       const sentAt = performance.now();
       try {
         context.drawImage(element, 0, 0, canvas.width, canvas.height);
-        const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.75));
+        const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', ANALYSIS_JPEG_QUALITY));
         if (cancelled) return;
         if (!blob) throw new Error('Frame webcam belum dapat dibaca');
         const response = await fetch('/pilot/v1/webcam/frame', { method: 'POST', headers: { 'Content-Type': 'image/jpeg', ...(webcam.liveSession ? { 'X-Live-Session': webcam.liveSession, 'X-Frame-Sequence': String(++sequence) } : {}) }, body: blob, signal: request.signal });
@@ -177,19 +187,14 @@ function WebcamVideo({ webcam }) {
         if (!cancelled) { setFresh(false); setAnalysis(null); setEngineError(error.name === 'AbortError' ? 'Engine melewati batas waktu; mencoba kembali' : error.message); }
       } finally {
         clearTimeout(timeout); abort.signal.removeEventListener('abort', stopRequest);
-        if (!cancelled) timer = setTimeout(sample, Math.max(0, 200 - (performance.now() - sentAt)));
+        if (!cancelled) timer = setTimeout(sample, Math.max(0, (webcam.analysisMode!=='person'?workstationIntervalMs(webcam.workstationFps):200) - (performance.now() - sentAt)));
       }
     }
     sample();
     const stale = setInterval(() => { if (received && performance.now() - received > 2500) setFresh(false); }, 500);
     return () => { cancelled = true; abort.abort(); clearTimeout(timer); clearInterval(stale); };
-  }, [webcam.stream,webcam.liveSession,webcam.engineStarting,webcam.inferencePaused]);
+  }, [webcam.stream,webcam.liveSession,webcam.engineStarting,webcam.inferencePaused,webcam.analysisMode,webcam.workstationFps]);
   const showDetections = webcam.status === 'LIVE' && fresh && analysis;
-  useEffect(() => {
-    const changed = () => setFullscreen(document.fullscreenElement === container.current);
-    document.addEventListener('fullscreenchange', changed);
-    return () => document.removeEventListener('fullscreenchange', changed);
-  }, []);
   useEffect(() => {
     if (!webcam.stream && document.fullscreenElement === container.current) document.exitFullscreen().catch(() => {});
   }, [webcam.stream]);
@@ -220,7 +225,7 @@ function WebcamVideo({ webcam }) {
     };
   }, [webcam.stream, webcam.frame, webcam.fail]);
 
-  return <><div className="webcam-preview" ref={container} data-testid="webcam-preview">
+  return <><div className="webcam-preview live-video-frame" ref={container} data-testid="webcam-preview" onPointerMove={fullscreenControls.wake} onFocusCapture={fullscreenControls.wake} onDoubleClick={e=>{e.stopPropagation();if(webcam.stream)fullscreenControls.toggle().catch(()=>setNotice('Layar penuh tidak tersedia.'));}}>
     {webcam.stream ? <video ref={video} autoPlay muted playsInline aria-label="Preview webcam lokal" style={{ objectFit: webcam.fit, transform: webcam.mirror ? 'scaleX(-1)' : undefined }} />
       : <div className="webcam-placeholder"><Video size={28} aria-hidden="true"/><h3>{webcam.status === 'REQUESTING' ? 'Izinkan kamera di browser' : 'Webcam lokal'}</h3><p>{webcam.status === 'CANCELLING' ? 'Tutup atau selesaikan dialog izin. Jika akses diberikan setelah pembatalan, kameranya langsung dihentikan.' : 'Pilih perangkat, lalu klik Mulai webcam. Tidak ada gambar simulasi pada preview ini.'}</p></div>}
     {showDetections && webcam.showDetections !== false && <svg className="webcam-detections" aria-label="Bounding box deteksi orang" viewBox={`0 0 ${analysis.width} ${analysis.height}`} preserveAspectRatio={webcam.fit === 'cover' ? 'xMidYMid slice' : 'xMidYMid meet'}>{analysis.detections.map((d, i) => {
@@ -228,8 +233,9 @@ function WebcamVideo({ webcam }) {
       const width = (d.box[2] - d.box[0]) * analysis.width, height = (d.box[3] - d.box[1]) * analysis.height;
       return <g key={i}><rect x={x} y={y} width={width} height={height} className="person-box"/><rect x={x} y={Math.max(0, y - 22)} width="155" height="22" className="person-label-bg"/><text x={x + 5} y={Math.max(0, y - 22) + 15}>{d.track_id ? `Track ${d.track_id.split(':').at(-1)}` : 'Orang'} · {Math.round(d.confidence * 100)}%</text></g>;
     })}</svg>}
-    {webcam.stream && webcam.calibration && webcam.showZones !== false && <svg className="webcam-detections" viewBox={`0 0 ${webcam.width || 640} ${webcam.height || 480}`} preserveAspectRatio={webcam.fit === 'cover' ? 'xMidYMid slice' : 'xMidYMid meet'} aria-label="Zona kalibrasi webcam">{webcam.calibration.zones.map(zone => <polygon key={zone.id} points={zone.polygon.map(([x, y]) => `${(webcam.mirror ? 1 - x : x) * (webcam.width || 640)},${y * (webcam.height || 480)}`).join(' ')} className="zone-overlay"/>)}</svg>}
-    {webcam.stream && <div className="webcam-video-tools"><span>{webcam.status === 'LIVE' ? 'WEBCAM LIVE' : LABELS[webcam.status]}</span><div className="inline-controls"><Button icon={Square} aria-label="Hentikan webcam dari preview" onClick={webcam.stop}>Hentikan</Button>{document.fullscreenEnabled && <Button icon={Maximize} aria-label={fullscreen ? 'Keluar layar penuh webcam' : 'Layar penuh webcam'} onClick={() => (fullscreen ? document.exitFullscreen() : container.current.requestFullscreen()).catch(() => setNotice('Layar penuh tidak tersedia dalam browser ini.'))}>{fullscreen ? 'Keluar layar penuh' : 'Layar penuh'}</Button>}</div></div>}
+    {webcam.stream && webcam.calibration && webcam.showZones !== false && <WorkstationOverlay basis="live" fit={webcam.fit} zones={webcam.calibration.zones.map(z=>({...z,polygon:z.polygon.map(([x,y])=>[webcam.mirror?1-x:x,y])}))} rows={webcam.workstations||[]} dimensions={{width:webcam.width||640,height:webcam.height||480}} frameSize={frameSize} formatTime={value=>durationClock(value*1e6)} fresh={Boolean(showDetections&&analysis.recorded)} playing={Boolean(showDetections&&analysis.recorded)} enabled={Boolean(showDetections&&analysis.recorded)}/>}
+    {webcam.stream && !fullscreen && <div className="webcam-video-tools"><span>{webcam.status === 'LIVE' ? 'WEBCAM LIVE' : LABELS[webcam.status]}</span><div className="inline-controls"><Button icon={Square} aria-label="Hentikan webcam dari preview" onClick={webcam.stop}>Hentikan</Button>{document.fullscreenEnabled && <Button icon={Maximize} aria-label="Layar penuh webcam" onClick={() => fullscreenControls.toggle().catch(() => setNotice('Layar penuh tidak tersedia dalam browser ini.'))}>Layar penuh</Button>}</div></div>}
+    <FullscreenControls controller={fullscreenControls} name="Webcam lokal"/>
     {notice && <p className="webcam-fullscreen-notice" role="status">{notice}</p>}
   </div>
     <div className="webcam-engine-status" data-testid="webcam-engine-status" role="status">
@@ -243,6 +249,8 @@ function WebcamVideo({ webcam }) {
 
 export function WebcamPanel({ webcam, wall = false, onFocus }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [fullscreenError,setFullscreenError]=useState('');
+  const previewRef=useRef(null);
   const active = !!webcam.stream, waiting = ['REQUESTING', 'CANCELLING'].includes(webcam.status);
   const controls = <>
     <div className="webcam-controls">
@@ -261,7 +269,9 @@ export function WebcamPanel({ webcam, wall = false, onFocus }) {
     {webcam.error && <p className="webcam-message error-text" role="alert">{webcam.error}</p>}
     {webcam.captureBlocked && <p className="webcam-message caption">Sesi RTSP sedang aktif. Hentikan pencatatan RTSP sebelum memulai webcam.</p>}
     {webcam.deviceNotice && <p className="webcam-message caption">{webcam.deviceNotice}</p>}
-    <WebcamVideo webcam={webcam}/>
+    {wall&&active&&<div className="webcam-wall-actions"><Button onClick={webcam.onCalibrate}>Atur area</Button><Button icon={Maximize} aria-label="Fullscreen Webcam lokal" onClick={()=>{setFullscreenError('');previewRef.current?.requestFullscreen().catch(()=>setFullscreenError('Fullscreen tidak tersedia di browser ini.'));}}>Fullscreen</Button></div>}
+    {fullscreenError&&<p className="error-text" role="alert">{fullscreenError}</p>}
+    <WebcamVideo webcam={webcam} frameRef={previewRef}/>
     <div className="webcam-preview-controls webcam-frame-status"><span data-testid="webcam-status" role="status">{LABELS[webcam.status]} · {webcam.width && webcam.height ? `${webcam.width} × ${webcam.height}` : 'Resolusi N/A'} · {webcam.fps == null ? 'FPS N/A' : `${webcam.fps} FPS preview`}</span></div>
     {!wall && <p className="engine-explanation">Detektor orang dan ByteTrack berjalan di Python lokal. Simpan kalibrasi lalu klik Mulai pencatatan live untuk merekam durasi zona ke SQLite. Frame terlambat atau kamera terputus menjadi UNKNOWN.</p>}
     {settingsOpen && <Modal title="Pengaturan webcam" description="Perangkat dan resolusi dapat diubah setelah webcam dihentikan." onClose={() => setSettingsOpen(false)}>{controls}<div className="modal-actions"><Button onClick={() => setSettingsOpen(false)}>Selesai</Button></div></Modal>}

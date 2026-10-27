@@ -56,6 +56,17 @@ def test_session_is_httponly_and_not_in_javascript_and_origin_is_enforced(integr
     assert client.get('/', headers={'Sec-Fetch-Site':'cross-site'}).status_code == 403
 
 
+def test_local_dashboard_cookies_do_not_collide_between_ports(integrated):
+    client, _, _ = integrated
+    page = client.get('http://127.0.0.1:5173/')
+    assert 'cctv_session_5173=' in page.headers['set-cookie']
+    client.cookies.set('cctv_session_5174', 'other-engine-token', domain='127.0.0.1', path='/pilot/')
+    assert client.get('http://127.0.0.1:5173/pilot/v1/replay/status').status_code == 200
+    assert client.get('http://127.0.0.1:5174/pilot/v1/replay/status').status_code == 401
+    assert client.post('http://127.0.0.1:5173/pilot/v1/replay/frame',
+                       headers={'Origin': 'http://127.0.0.1:5174'}).status_code == 403
+
+
 def test_dashboard_replay_reports_timeline_and_csv_match_sqlite(integrated):
     client, controller, config = integrated
     client.get('/')

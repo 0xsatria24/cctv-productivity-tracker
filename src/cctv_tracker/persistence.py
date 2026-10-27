@@ -110,6 +110,7 @@ class Database:
                          (run_id, model_id, "0.2.0", json.dumps({"data_source": source, "identity_source": "anonymous",
                           "workspace_ids": [stable_id("workspace:" + settings.camera_id + ":" + z.id) for z in settings.zones],
                           'model_sha256': model_sha, 'calibration_revision': model_manifest.get('calibration_revision'),
+                          'analysis_mode': model_manifest.get('analysis_mode','person'),
                           'session_rules': asdict(settings.sessions),
                           'evidence_policy_revision': EVIDENCE_POLICY_REVISION,
                           'detection_policy': asdict(settings.detection),
