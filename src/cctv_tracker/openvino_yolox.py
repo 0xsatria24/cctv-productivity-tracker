@@ -4,8 +4,8 @@ from .webcam import WebcamDetector, MODEL_PATH
 
 
 class OpenVinoYoloX(WebcamDetector):
-    def __init__(self, model_path=MODEL_PATH, *, device='CPU', threads=4, cache_dir=None):
-        super().__init__(model_path)
+    def __init__(self, model_path=MODEL_PATH, *, device='CPU', threads=4, cache_dir=None, tuning=None):
+        super().__init__(model_path, tuning=tuning)
         if device not in {'CPU', 'GPU'}:
             raise ValueError('Perangkat OpenVINO harus CPU atau GPU; tidak ada fallback otomatis')
         if type(threads) is not int or not 1 <= threads <= 16:

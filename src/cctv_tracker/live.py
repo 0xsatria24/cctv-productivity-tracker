@@ -14,9 +14,10 @@ from uuid import uuid4
 from .config import Rules, Zone
 from .persistence import Database, now_us
 from .pipeline import Pipeline
-from .vision import Detection
+from .vision import frame_detections
 from .rtsp import RtspCapture, validate_rtsp_url
 from .webcam import MODEL_SHA256
+from .workstation_engine import WORKSTATION_FPS, workstation_policy
 
 SOURCES = {'WEBCAM_LIVE', 'RTSP_LIVE'}
 MODEL_MANIFEST = {'license': 'Apache-2.0', 'source': 'OpenCV Zoo YOLOX 47534e27c9851bb1128ccc0102f1145e27f23f98',
@@ -28,7 +29,8 @@ class AccountingFailure(RuntimeError):
 
 
 def validate_calibration(value):
-    if set(value) != {'width', 'height', 'zones', 'rules', 'camera_key'}:
+    required = {'width', 'height', 'zones', 'rules', 'camera_key'}
+    if not required <= set(value) or set(value) - required - {'position', 'analysis_mode', 'markers'}:
         raise ValueError('Konfigurasi kalibrasi tidak lengkap')
     width, height = value['width'], value['height']
     if not isinstance(value['camera_key'], str) or len(value['camera_key']) != 64 or any(c not in '0123456789abcdef' for c in value['camera_key']):
@@ -41,6 +43,12 @@ def validate_calibration(value):
     if len({z.id for z in zones}) != len(zones) or any(len(z.id) > 40 or len(z.name) > 80 or not z.name.strip() or not z.exclusive_group.strip() or len(z.exclusive_group) > 40 for z in zones):
         raise ValueError('ID zona harus unik; nama maksimal 80 karakter')
     rules = Rules(**value['rules'])
+    if value.get('analysis_mode', 'person') not in {'workstation', 'person'}:
+        raise ValueError('Mode analisis live tidak valid')
+    from .aruco import validate_registry
+    validate_registry(value.get('markers', []))
+    from .positioning import position_calibration
+    position_calibration(value.get('position')).validate_zones(zones)
     if not 0.1 <= rules.occupied_confirm_seconds <= 60 or not 0.1 <= rules.empty_confirm_seconds <= 120 or not 0.5 <= rules.max_evidence_gap_seconds <= 10:
         raise ValueError('Batas konfirmasi/gap di luar rentang live yang didukung')
     return zones, rules
@@ -70,6 +78,10 @@ class LiveController:
         with self.lock:
             value = copy.deepcopy(self.state)
             value['calibrations'] = copy.deepcopy(self.profiles)
+            value['workstation_policy'] = workstation_policy(self.settings)
+        scheduling = getattr(self.detector, 'scheduling_snapshot', None)
+        if scheduling:
+            value['scheduler'] = scheduling()
         latest = value.get('latest')
         if latest and (time.perf_counter_ns() - latest['processed_monotonic_ns']) / 1e9 > 3:
             value['latest'] = None
@@ -113,16 +125,20 @@ class LiveController:
                 raise ValueError('Simpan kalibrasi zona untuk sumber ini terlebih dahulu')
             if not preview_only and camera_key != profile['camera_key']:
                 raise ValueError('Kamera berbeda dari kalibrasi tersimpan. Kalibrasikan kamera ini terlebih dahulu')
-            zones, rules = validate_calibration({k: v for k, v in profile.items() if k != 'revision'}) if profile else ((), Rules(max_evidence_gap_seconds=3))
+            zones, rules = validate_calibration({k: v for k, v in profile.items() if k != 'revision'}) if profile else ((), self.settings.rules)
             camera_id = self.settings.camera_id if self.settings.camera_id != 'camera-1' else source.lower() + '-primary'
+            from .positioning import position_calibration
             config = replace(self.settings, camera_id=camera_id, zones=zones, rules=rules,
+                             position=position_calibration(profile.get('position') if profile else None),
+                             inference_fps=WORKSTATION_FPS if profile and profile.get('analysis_mode') == 'workstation' else 5,
                              frame_stale_seconds=rules.max_evidence_gap_seconds)
             session = str(uuid4())
             self.stop_event.clear()
             self.last_submitted = 0
             self.preview = None
             self.preview_history.clear()
-            self._update(status='STARTING', source=source, session_id=session, run_id=None, camera_health='RECONNECTING', processed=0, error=None, latest=None, preview_only=preview_only, camera_key=camera_key, worker_heartbeat_ns=time.perf_counter_ns())
+            self._update(status='STARTING', source=source, session_id=session, run_id=None, camera_health='RECONNECTING', processed=0, error=None, latest=None, workstations=[], preview_only=preview_only, camera_key=camera_key,
+                         analysis_mode=profile.get('analysis_mode', 'person') if profile else 'workstation', worker_heartbeat_ns=time.perf_counter_ns())
             self.thread = Thread(target=self._run, args=(config, profile, source, session, url, preview_only), name='live-occupancy', daemon=False)
             self.thread.start()
         return self.snapshot()
@@ -183,7 +199,7 @@ class LiveController:
         from .display_tracks import DisplayTracks
         activity = TrackActivity(config.rules.max_evidence_gap_seconds, config.activity_idle_seconds, config.activity_working_seconds, config.box_smoothing_ms, enabled=config.activity_enabled)
         performance = Performance()
-        display_tracks = DisplayTracks(config.display_prediction_seconds)
+        display_tracks = DisplayTracks(config.tracking.display_prediction_seconds)
         rate = AdaptiveRate(config.inference_fps,config.minimum_inference_fps,config.adaptive_inference)
         resources = SystemLoad() if config.adaptive_inference else None
         pipeline, capture, db = None, None, None
@@ -205,20 +221,23 @@ class LiveController:
             db = Database(config.database)
             anchor_mono, anchor_utc = time.perf_counter_ns(), now_us()
             if not preview_only:
-                pipeline = Pipeline(config, db, anchor_utc, source, getattr(self.detector, 'sha', MODEL_SHA256), {**getattr(self.detector, 'manifest', MODEL_MANIFEST), 'calibration_revision': profile['revision'], 'calibration_width': profile['width'], 'calibration_height': profile['height']}, live_events=True)
+                pipeline = Pipeline(config, db, anchor_utc, source, getattr(self.detector, 'sha', MODEL_SHA256), {**getattr(self.detector, 'manifest', MODEL_MANIFEST), 'calibration_revision': profile['revision'], 'calibration_width': profile['width'], 'calibration_height': profile['height']}, live_events=True,
+                                    area_mode=profile.get('analysis_mode') == 'workstation', markers=profile.get('markers', []))
             self._update(status='RUNNING', run_id=pipeline.writer.run_id if pipeline else None)
 
-            def account(detections, mono, unavailable=None):
+            def account(detections, mono, unavailable=None, *, frame_jpeg=None):
                 nonlocal seq, last_mono
                 if mono <= last_mono:
                     raise ValueError('Frame terlalu lama; tidak menjadi bukti pencatatan')
                 seq += 1
                 # Anchor UTC once; elapsed durations follow the server monotonic clock.
                 try:
-                    result = pipeline.feed(detections, anchor_utc + (mono - anchor_mono) // 1000, mono, seq, generation, unavailable) if pipeline else {}
+                    result = pipeline.feed(detections, anchor_utc + (mono - anchor_mono) // 1000, mono, seq, generation, unavailable, frame_jpeg=frame_jpeg) if pipeline else {}
                 except Exception as error:
                     raise AccountingFailure('Accounting stopped at committed checkpoint') from error
                 last_mono = mono
+                if 'workstations' in result:
+                    self._update(workstations=result['workstations'])
                 return result
 
             while not self.stop_event.is_set():
@@ -258,10 +277,15 @@ class LiveController:
                                 continue
                             last_rate_tick = tick
                         started = time.perf_counter_ns()
-                        select_latest = getattr(self.detector,'detect_latest',None)
-                        if source == 'RTSP_LIVE' and select_latest:
-                            result,item = select_latest(item,lambda:capture.read(timeout=0),config.frame_stale_seconds)
-                            generation,mono = item['generation'],item['monotonic_ns']
+                        if (source == 'RTSP_LIVE' and profile and profile.get('analysis_mode') == 'workstation'
+                                and last_mono and mono-last_mono < 1e9/WORKSTATION_FPS):
+                            continue
+                        detect_latest = getattr(self.detector, 'detect_latest', None)
+                        if detect_latest:
+                            result, item = detect_latest(item, (lambda: capture.read(timeout=0)) if capture else None,
+                                                       config.frame_stale_seconds, stop_event=self.stop_event,
+                                                       minimum_monotonic_ns=last_mono)
+                            generation, mono = item['generation'], item['monotonic_ns']
                         else:
                             result = self.detector.detect(item['jpeg'])
                         inferred = time.perf_counter_ns()
@@ -271,8 +295,7 @@ class LiveController:
                             raise ValueError('Inferensi terlalu lambat; hasil tidak menjadi bukti')
                         if self.stop_event.is_set():
                             raise ValueError('Sesi telah berhenti; hasil inferensi diabaikan')
-                        candidates = result.pop('tracking_candidates', result['detections'])
-                        accounting = account([Detection(tuple(d['box']), d['confidence']) for d in candidates], mono)
+                        accounting = account(frame_detections(result), mono, frame_jpeg=item['jpeg'])
                         last_valid = mono / 1e9; attempts = 0
                         result.update(accounting)
                         result['detections'] = [d for d in result['detections'] if d.get('track_id') is not None or d['confidence'] >= 0.45]

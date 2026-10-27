@@ -2,24 +2,26 @@ import { Children, cloneElement, isValidElement, useEffect, useId, useMemo, useR
 import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Info, X } from 'lucide-react';
 import { CAMERA_LABELS, LABELS, clock, duration, percent } from './domain';
 import { usePrototype } from './store';
+import { useLanguage } from './language';
 
-export function Button({ children, variant = 'secondary', icon: Icon, className = '', ...props }) { return <button className={`button ${variant} ${className}`} {...props}>{Icon && <Icon size={15} aria-hidden="true"/>}{children}</button>; }
-export function Status({ value, label }) { return <span className={`status ${value?.toLowerCase()}`}><span className="status-mark" aria-hidden="true"/>{label || LABELS[value] || CAMERA_LABELS[value] || value}</span>; }
-export function Panel({ title, caption, action, children, className = '' }) { return <section className={`panel ${className}`}><div className="panel-heading"><div><h2>{title}</h2>{caption && <p>{caption}</p>}</div>{action}</div>{children}</section>; }
+export function Button({ children, variant = 'secondary', icon: Icon, className = '', ...props }) { const {t}=useLanguage();return <button className={`button ${variant} ${className}`} {...props}>{Icon && <Icon size={15} aria-hidden="true"/>}{t(children)}</button>; }
+export function Status({ value, label }) { const {t}=useLanguage();return <span className={`status ${value?.toLowerCase()}`}><span className="status-mark" aria-hidden="true"/>{t(label || LABELS[value] || CAMERA_LABELS[value] || value)}</span>; }
+export function Panel({ title, caption, action, children, className = '' }) { const {t}=useLanguage();return <section className={`panel ${className}`}><div className="panel-heading"><div><h2>{t(title)}</h2>{caption && <p>{t(caption)}</p>}</div>{action}</div>{children}</section>; }
 export function Field({ label, hint, children, className = '' }) {
+  const {t}=useLanguage();
   const generatedId=useId();let controlId=generatedId,attached=false;
   function attach(child) {
-    if(!isValidElement(child))return child;
+    if(!isValidElement(child))return t(child);
     if(!attached&&['input','select','textarea'].includes(child.type)) {
       attached=true;controlId=child.props.id||generatedId;
-      return cloneElement(child,{id:controlId,...(hint?{'aria-describedby':`${generatedId}-hint`}:{})});
+      return cloneElement(child,{id:controlId,...(hint?{'aria-describedby':`${generatedId}-hint`}:{}),...(child.props.children?{children:Children.map(child.props.children,attach)}:{})});
     }
     return child.props.children?cloneElement(child,{children:Children.map(child.props.children,attach)}):child;
   }
   const controls=Children.map(children,attach);
-  return <div className={`field ${className}`}><label htmlFor={controlId}>{label}</label>{controls}{hint&&<small id={`${generatedId}-hint`}>{hint}</small>}</div>;
+  return <div className={`field ${className}`}><label htmlFor={controlId}>{t(label)}</label>{controls}{hint&&<small id={`${generatedId}-hint`}>{t(hint)}</small>}</div>;
 }
-export function Empty({ title = 'Belum ada data', description = 'Tidak ada data untuk pilihan ini. Ubah pilihan atau periode lalu coba lagi.', action }) { return <div className="empty-state"><h3>{title}</h3><p>{description}</p>{action}</div>; }
+export function Empty({ title = 'Belum ada data', description = '', action }) { const {t}=useLanguage();return <div className="empty-state"><h3>{t(title)}</h3>{description&&<p>{t(description)}</p>}{action}</div>; }
 export function MetricStrip({ metrics, small = false }) {
   const { setDialog } = usePrototype();
   return <div className={`metric-strip ${small ? 'compact' : ''}`}>
@@ -28,6 +30,7 @@ export function MetricStrip({ metrics, small = false }) {
   </div>;
 }
 export function Modal({ title, description, children, onClose, wide = false, footer }) {
+  const {t}=useLanguage();
   const dialog = useRef(null);
   useEffect(() => {
     const element = dialog.current, previous = document.activeElement;
@@ -35,7 +38,7 @@ export function Modal({ title, description, children, onClose, wide = false, foo
     return () => { if (element.open) element.close(); if (previous instanceof HTMLElement && document.contains(previous)) previous.focus(); };
   }, []);
   return <dialog className={`modal ${wide ? 'wide' : ''}`} ref={dialog} aria-labelledby="modal-title" aria-describedby={description ? 'modal-description' : undefined} onCancel={event => { event.preventDefault(); onClose(); }}>
-    <div className="modal-heading"><div><h2 id="modal-title">{title}</h2>{description && <p id="modal-description">{description}</p>}</div><button className="icon-button" aria-label="Tutup dialog" onClick={onClose}><X size={18}/></button></div>
+    <div className="modal-heading"><div><h2 id="modal-title">{t(title)}</h2>{description && <p id="modal-description">{t(description)}</p>}</div><button className="icon-button" aria-label={t('Tutup dialog')} onClick={onClose}><X size={18}/></button></div>
     <div className="modal-body">{children}</div>{footer && <div className="modal-footer">{footer}</div>}
   </dialog>;
 }
@@ -56,5 +59,5 @@ export function DataTable({ columns, rows, pageSize = 8, resetKey = '', empty, t
 }
 export function EventList({ events, onSelect, limit = 6 }) {
   const { state } = usePrototype();
-  return events.length ? <div className="event-list">{events.slice(0, limit).map(event => <button key={event.id} className="event-row" onClick={() => onSelect(event)}><time>{clock(event.time, state.settings.timezone, true)}</time><span><strong>{event.message}</strong><small>{event.type} · {event.cameraId || 'Sistem simulasi'}</small></span><ChevronRight size={14}/></button>)}</div> : <Empty title="Belum ada event" description="Langkah simulasi akan menghasilkan observasi dan event baru."/>;
+  return events.length ? <div className="event-list">{events.slice(0, limit).map(event => <button key={event.id} className="event-row" onClick={() => onSelect(event)}><time>{clock(event.time, state.settings.timezone, true)}</time><span><strong>{event.message}</strong><small>{event.type} · {event.cameraId || 'Sistem'}</small></span><ChevronRight size={14}/></button>)}</div> : <Empty title="Belum ada event"/>;
 }

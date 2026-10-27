@@ -1,0 +1,244 @@
+{
+  "baseline_revision": "65f7f8d05ec1af7f8887d6d262a18b68065716fe",
+  "baseline": {
+    "source_sha256": "2d1c55f653202138a86d3ede5f01a2923dd71b8e5ac70d53f52bbf53dcf99683",
+    "metadata": {
+      "width": 640,
+      "height": 480,
+      "fps": "15",
+      "duration_seconds": 265.0
+    },
+    "environment": {
+      "platform": "Windows-11-10.0.26200-SP0",
+      "python": "3.12.14",
+      "sessions_module": "D:\\Projects\\cctv 2\\runtime\\production-audit\\baseline-source\\src\\cctv_tracker\\sessions.py",
+      "packages": {
+        "numpy": "2.2.6",
+        "av": "16.0.1",
+        "supervision": "0.26.1",
+        "openvino": "2026.4.1",
+        "opencv-python": "4.12.0.88"
+      }
+    },
+    "frames": 1325,
+    "warm_median_ms": 78.85710000118706,
+    "warm_p95_ms": 153.87059998465702,
+    "warm_throughput_fps": 11.177995466854545,
+    "wall_seconds": 133.40820189999067,
+    "empty_frames": 931,
+    "sessions_created": 90,
+    "reid_statuses": {
+      "SHADOW": 3,
+      "SAMPLE_INTERVAL": 3,
+      "LATENCY_BUDGET": 1,
+      "DISABLED_AFTER_ERROR": 1318
+    },
+    "rss_samples": [
+      {
+        "frame": 1,
+        "rss_bytes": 440860672
+      },
+      {
+        "frame": 100,
+        "rss_bytes": 489787392
+      },
+      {
+        "frame": 200,
+        "rss_bytes": 488935424
+      },
+      {
+        "frame": 300,
+        "rss_bytes": 490082304
+      },
+      {
+        "frame": 400,
+        "rss_bytes": 490205184
+      },
+      {
+        "frame": 500,
+        "rss_bytes": 490291200
+      },
+      {
+        "frame": 600,
+        "rss_bytes": 490315776
+      },
+      {
+        "frame": 700,
+        "rss_bytes": 490348544
+      },
+      {
+        "frame": 800,
+        "rss_bytes": 489447424
+      },
+      {
+        "frame": 900,
+        "rss_bytes": 490467328
+      },
+      {
+        "frame": 1000,
+        "rss_bytes": 490516480
+      },
+      {
+        "frame": 1100,
+        "rss_bytes": 491532288
+      },
+      {
+        "frame": 1200,
+        "rss_bytes": 491646976
+      },
+      {
+        "frame": 1300,
+        "rss_bytes": 490729472
+      },
+      {
+        "frame": 1325,
+        "rss_bytes": 489697280
+      }
+    ],
+    "session_metrics": {
+      "weak_session_rejected": 563,
+      "mapping": 99,
+      "started": 90,
+      "match_accepted": 449,
+      "lost": 89,
+      "rejected_insufficient_evidence": 285,
+      "weak_continuation_frozen": 180,
+      "expired": 86
+    },
+    "retained_sessions": 4,
+    "gallery_sessions": 0,
+    "validation": "Unlabeled video execution; no IDF1/HOTA, identity accuracy or multi-camera capacity claim.",
+    "vram": "Unavailable; Iris Xe uses shared memory. RSS excludes GPU allocations."
+  },
+  "after": {
+    "source_sha256": "2d1c55f653202138a86d3ede5f01a2923dd71b8e5ac70d53f52bbf53dcf99683",
+    "metadata": {
+      "width": 640,
+      "height": 480,
+      "fps": "15",
+      "duration_seconds": 265.0
+    },
+    "environment": {
+      "platform": "Windows-11-10.0.26200-SP0",
+      "python": "3.12.14",
+      "sessions_module": "D:\\Projects\\cctv 2\\src\\cctv_tracker\\sessions.py",
+      "packages": {
+        "numpy": "2.2.6",
+        "av": "16.0.1",
+        "supervision": "0.26.1",
+        "openvino": "2026.4.1",
+        "opencv-python": "4.12.0.88"
+      }
+    },
+    "frames": 1325,
+    "warm_median_ms": 83.55970001139212,
+    "warm_p95_ms": 150.0938999815844,
+    "warm_throughput_fps": 10.330520823776709,
+    "wall_seconds": 143.18844550001086,
+    "empty_frames": 931,
+    "sessions_created": 90,
+    "reid_statuses": {
+      "SHADOW": 662,
+      "SAMPLE_INTERVAL": 662,
+      "WARMUP_BUDGET": 1
+    },
+    "rss_samples": [
+      {
+        "frame": 1,
+        "rss_bytes": 441458688
+      },
+      {
+        "frame": 100,
+        "rss_bytes": 491515904
+      },
+      {
+        "frame": 200,
+        "rss_bytes": 490807296
+      },
+      {
+        "frame": 300,
+        "rss_bytes": 492695552
+      },
+      {
+        "frame": 400,
+        "rss_bytes": 492822528
+      },
+      {
+        "frame": 500,
+        "rss_bytes": 492904448
+      },
+      {
+        "frame": 600,
+        "rss_bytes": 492937216
+      },
+      {
+        "frame": 700,
+        "rss_bytes": 492961792
+      },
+      {
+        "frame": 800,
+        "rss_bytes": 492056576
+      },
+      {
+        "frame": 900,
+        "rss_bytes": 493105152
+      },
+      {
+        "frame": 1000,
+        "rss_bytes": 493146112
+      },
+      {
+        "frame": 1100,
+        "rss_bytes": 493228032
+      },
+      {
+        "frame": 1200,
+        "rss_bytes": 493346816
+      },
+      {
+        "frame": 1300,
+        "rss_bytes": 492421120
+      },
+      {
+        "frame": 1325,
+        "rss_bytes": 491421696
+      }
+    ],
+    "session_metrics": {
+      "weak_session_rejected": 563,
+      "mapping": 99,
+      "started": 90,
+      "match_accepted": 449,
+      "lost": 89,
+      "rejected_insufficient_evidence": 285,
+      "weak_continuation_frozen": 180,
+      "expired": 86
+    },
+    "retained_sessions": 4,
+    "gallery_sessions": 2,
+    "validation": "Unlabeled video execution; no IDF1/HOTA, identity accuracy or multi-camera capacity claim.",
+    "vram": "Unavailable; Iris Xe uses shared memory. RSS excludes GPU allocations."
+  },
+  "synthetic_manager_after": {
+    "median_ms": 1.2969,
+    "p95_ms": 2.3655,
+    "people": 16,
+    "measured_frames": 2000,
+    "retained_python_heap_bytes_by_phase": [
+      57404,
+      58664
+    ],
+    "peak_python_heap_bytes": 185312,
+    "heap_measurement": "fresh manager Python allocations; excludes native decoder/model and process RSS",
+    "retained_sessions": 16,
+    "history_samples": 128
+  },
+  "backend_tests": {
+    "passed": 313,
+    "warnings": 3
+  },
+  "frontend_tests": {
+    "passed": 27
+  },
+  "release_readiness": "FAIL: long-term identity and field detection quality not established"
+}

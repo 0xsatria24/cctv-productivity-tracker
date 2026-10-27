@@ -53,18 +53,25 @@ class PersonSession:
     candidate_since_ns: int = 0
     reason: str | None = None
     merged_into: str | None = None
+    last_observation_strong: bool = True
+    last_strong_ns: int | None = None
+    observed_ns: int = 0
 
 
 class SessionManager:
-    def __init__(self, settings):
+    def __init__(self, settings, *, continuation_confidence=None):
         self.settings, self.rules = settings, settings.sessions
         self.sessions = {}
         self.dirty = {}
         self.events = []
         self.mapping_version = 0
         self.generation = None
+        self.now_ns = None
         self.metrics = Counter()
         self._velocity_cache = {}
+        self.continuation_confidence = continuation_confidence
+        if continuation_confidence is not None and not 0 < continuation_confidence <= settings.rules.strong_confidence:
+            raise ValueError('Continuation confidence must not exceed strong evidence threshold')
 
     def _diagnose(self, action, **values):
         self.metrics[action] += 1
@@ -165,7 +172,7 @@ class SessionManager:
         score = 1 - 0.7 * error / tolerance - 0.15 * sum(abs(1 - r) for r in ratios)
         return score if score >= self.rules.minimum_match_score else None
 
-    def _pairs(self, rows, candidates, scorer):
+    def _pairs(self, rows, candidates, scorer, *, diagnose=True):
         # Mutual unique bests with margins on BOTH sides. Unmatched is a valid
         # result; raw tracker IDs never break a tie or force an assignment.
         by_row, by_candidate = {}, {}
@@ -184,14 +191,16 @@ class SessionManager:
             if ((len(scores) > 1 and score - scores[1][0] < self.rules.match_margin)
                     or peers[0][1] != i or (len(peers) > 1 and score - peers[1][0] < self.rules.match_margin)):
                 ambiguous.update(s for _, s in scores)
-                self._diagnose('rejected_ambiguous')
+                if diagnose:
+                    self._diagnose('rejected_ambiguous')
             else:
                 accepted[i] = sid
-                self._diagnose('match_accepted', session_id=sid, score=round(score, 4))
+                if diagnose:
+                    self._diagnose('match_accepted', session_id=sid, score=round(score, 4))
         return accepted, ambiguous
 
     def _observe_zones(self, session, detection, utc, delta):
-        membership = associate([detection], self.settings.zones, self.settings.rules)
+        membership = associate([detection], self.settings.zones, self.settings.rules, self.settings.position)
         for alias, (state, _, _) in membership.items():
             zone = session.zones.get(alias)
             inside = state == State.OCCUPIED
@@ -213,6 +222,9 @@ class SessionManager:
                     zone.outside_count = 0
 
     def _new(self, detection, utc, at, generation):
+        if detection.tracking_only or detection.confidence < self.settings.rules.strong_confidence:
+            self._diagnose('weak_session_rejected')
+            return None
         if len(self.sessions) >= self.rules.max_sessions:
             lost = [s for s in self.sessions.values() if s.status == 'LOST']
             if not lost:
@@ -220,7 +232,7 @@ class SessionManager:
                 return None
             self._expire(min(lost, key=lambda s: s.last_ns), 'CAPACITY')
         session = PersonSession(str(uuid4()), self.settings.camera_id, generation, utc, utc, at, at,
-                                detection.box, deque([(at, detection.box)], maxlen=self.rules.history_size), origin_box=detection.box)
+                                detection.box, deque([(at, detection.box)], maxlen=self.rules.history_size), origin_box=detection.box, last_strong_ns=at)
         self.sessions[session.session_id] = session
         self._bind(session, detection, generation)
         self._observe_zones(session, detection, utc, 0)
@@ -235,6 +247,7 @@ class SessionManager:
             return temporary
         bonus = gap if self.rules.count_lost_gap else 0
         old.accumulated_ns += temporary.accumulated_ns + bonus
+        old.observed_ns += temporary.observed_ns
         for alias, previous in old.zones.items():
             if alias not in temporary.zones:
                 previous.observed_inside = False
@@ -250,11 +263,13 @@ class SessionManager:
                 previous.inside, previous.observed_inside = current.inside, current.observed_inside
                 previous.outside_count = current.outside_count
         old.last_ns, old.last_seen, old.box = at, temporary.last_seen, temporary.box
+        old.last_strong_ns, old.last_observation_strong = temporary.last_strong_ns, temporary.last_observation_strong
         old.history = temporary.history
         old.status, old.reason = 'ACTIVE', None
         # Retire the provisional row atomically; its time now belongs to old.
         temporary.merged_into = old.session_id
         temporary.accumulated_ns = 0
+        temporary.observed_ns = 0
         for zone in temporary.zones.values():
             zone.duration_ns = 0
         self._expire(temporary, 'MERGED')
@@ -263,12 +278,36 @@ class SessionManager:
                     count_lost_gap=self.rules.count_lost_gap)
         return old
 
-    def update(self, detections, utc, at, generation, unavailable=None):
+    def recovery_score(self, old, candidate, detection, at):
+        """Shared motion gate for session recovery and shadow appearance proposals."""
+        if detection.tracking_only or detection.confidence < self.settings.rules.strong_confidence:
+            return None
+        gap = candidate.first_ns - old.last_ns
+        strong_at = old.last_strong_ns if old.last_strong_ns is not None else old.last_ns
+        if gap <= 0 or candidate.first_ns - strong_at > self.rules.motion_recovery_seconds * NS:
+            return None
+        score = self._score(old, candidate.box, at, recovery=True)
+        prior = self._velocity(old)
+        if score is not None:
+            origin, arrival = center(old.box), center(candidate.origin_box)
+            displacement = (arrival[0] - origin[0], arrival[1] - origin[1])
+            expected = math.hypot(*prior) * gap / NS
+            forward = sum(d * v for d, v in zip(displacement, prior)) / math.hypot(*prior)
+            if abs(1 - forward / expected) > self.rules.recovery_progress_tolerance:
+                return None
+        velocity = self._velocity(candidate)
+        if score is not None and velocity is not None:
+            if sum(a * b for a, b in zip(velocity, prior)) / (math.hypot(*velocity) * math.hypot(*prior)) < 0.8:
+                return None
+        return score
+
+    def update(self, detections, utc, at, generation, unavailable=None, *, recover=True):
+        self.now_ns = at
         self._velocity_cache.clear()
         changed_generation = self.generation is not None and generation != self.generation
         active = [s for s in self.sessions.values() if s.status == 'ACTIVE']
         for session in active:
-            if unavailable or changed_generation or at - session.last_ns > self.settings.rules.max_evidence_gap_seconds * NS:
+            if unavailable or changed_generation or at - (session.last_strong_ns if session.last_strong_ns is not None else session.last_ns) > self.settings.rules.max_evidence_gap_seconds * NS:
                 self._lose(session, unavailable or ('GENERATION_CHANGED' if changed_generation else 'EVIDENCE_GAP'),
                            block=bool(unavailable or changed_generation))
         for session in list(self.sessions.values()):
@@ -282,22 +321,42 @@ class SessionManager:
         if unavailable:
             return []
         active = [s for s in self.sessions.values() if s.status == 'ACTIVE']
-        pairs, ambiguous = self._pairs(detections, active, lambda s, d: self._score(s, d.box, at)
-                                      if d.confidence >= self.settings.rules.strong_confidence else None)
+        raw_counts = Counter(d.track_id for d in detections if d.track_id is not None)
+
+        def active_score(session, detection):
+            strong = not detection.tracking_only and detection.confidence >= self.settings.rules.strong_confidence
+            continuing = (self.continuation_confidence is not None
+                          and detection.confidence >= self.continuation_confidence
+                          and detection.track_id is not None and raw_counts[detection.track_id] == 1
+                          and detection.track_id == session.track_id)
+            return self._score(session, detection.box, at) if strong or continuing else None
+
+        pairs, ambiguous = self._pairs(detections, active, active_score)
         for session in active:
             if session.session_id not in pairs.values():
                 self._lose(session, 'AMBIGUOUS' if session.session_id in ambiguous else 'DETECTION_LOST',
                            block=session.session_id in ambiguous)
         bindings = []
-        raw_counts = Counter(d.track_id for d in detections if d.track_id is not None)
         for i, detection in enumerate(detections):
             session = self.sessions.get(pairs.get(i))
             if session:
-                delta = at - session.last_ns
+                strong = not detection.tracking_only and detection.confidence >= self.settings.rules.strong_confidence
+                delta = at - session.last_ns if strong and session.last_observation_strong else 0
                 session.accumulated_ns += delta
-                self._observe_zones(session, detection, utc, delta)
-                session.last_ns, session.last_seen, session.box = at, utc, detection.box
+                session.observed_ns += delta
+                if strong:
+                    self._observe_zones(session, detection, utc, delta)
+                else:
+                    for zone in session.zones.values():
+                        zone.observed_inside, zone.outside_count = False, 0
+                session.last_ns, session.box = at, detection.box
                 session.history.append((at, detection.box))
+                session.last_observation_strong = strong
+                if strong:
+                    session.last_strong_ns = at
+                    session.last_seen = utc
+                else:
+                    self._diagnose('weak_continuation_frozen')
                 self._bind(session, detection, generation)
                 self.dirty[session.session_id] = session
             else:
@@ -307,34 +366,14 @@ class SessionManager:
                 session.track_id = None
                 self._diagnose('duplicate_tracker_id')
             bindings.append((detection, session))
+        if not recover:
+            return bindings
         provisional = [(i, s) for i, (_, s) in enumerate(bindings) if s and at - s.first_ns <= self.rules.recovery_confirmation_window_seconds * NS]
         lost = [s for s in self.sessions.values() if s.status == 'LOST' and s.recoverable and s.generation == generation]
 
         def recovery_score(old, row):
             index, candidate = row
-            if bindings[index][0].confidence < self.settings.rules.strong_confidence:
-                return None
-            gap = candidate.first_ns - old.last_ns
-            if gap <= 0 or gap > self.rules.motion_recovery_seconds * NS:
-                return None
-            score = self._score(old, candidate.box, at, recovery=True)
-            prior = self._velocity(old)
-            if score is not None:
-                # Verify the provisional session's FIRST box against the missing
-                # trajectory. B starting at A's last box must not inherit A even
-                # if B subsequently moves in the same direction and at A's speed.
-                origin, arrival = center(old.box), center(candidate.origin_box)
-                displacement = (arrival[0] - origin[0], arrival[1] - origin[1])
-                expected = math.hypot(*prior) * gap / NS
-                forward = sum(d * v for d, v in zip(displacement, prior)) / math.hypot(*prior)
-                progress = forward / expected
-                if abs(1 - progress) > self.rules.recovery_progress_tolerance:
-                    return None
-            velocity = self._velocity(candidate)
-            if score is not None and velocity is not None:
-                if sum(a * b for a, b in zip(velocity, prior)) / (math.hypot(*velocity) * math.hypot(*prior)) < 0.8:
-                    return None
-            return score
+            return self.recovery_score(old, candidate, bindings[index][0], at)
 
         recovery_pairs, _ = self._pairs(provisional, lost, recovery_score)
         for j, (index, candidate) in enumerate(provisional):
@@ -365,12 +404,18 @@ class SessionManager:
         return [self.snapshot(s) for s in self.dirty.values()]
 
     def snapshot(self, session):
+        at = self.now_ns if self.now_ns is not None else session.last_ns
+        strong_at = session.last_strong_ns if session.last_strong_ns is not None else session.first_ns
         return {'session_id': session.session_id, 'camera_id': session.camera_id, 'generation_id': session.generation,
                 'first_seen_utc_us': session.first_seen, 'last_seen_utc_us': session.last_seen,
+                'observed_duration_us': session.observed_ns // 1000,
+                'total_elapsed_us': max(0, at - session.first_ns) // 1000,
+                'absence_duration_us': max(0, at - strong_at) // 1000,
                 'accumulated_duration_us': session.accumulated_ns // 1000, 'status': session.status,
                 'track_id': session.track_id, 'track_lifecycle': session.track_lifecycle,
                 'mapping_version': self.mapping_version, 'reason': session.reason, 'merged_into': session.merged_into,
-                'matching': {'motion_recoverable': session.recoverable, 'history_samples': len(session.history)},
+                'matching': {'motion_recoverable': session.recoverable, 'history_samples': len(session.history),
+                             'observed_duration_us': session.observed_ns // 1000},
                 'zone_times': {alias: {'first_seen_utc_us': z.first_seen, 'last_seen_utc_us': z.last_seen,
                                       'presence_us': z.duration_ns // 1000, 'inside': z.inside}
                                for alias, z in session.zones.items()}}
@@ -381,5 +426,6 @@ class SessionManager:
 
     def finish(self):
         self.sessions.clear()
+        self.now_ns = None
         self._velocity_cache.clear()
         self.checkpoint()

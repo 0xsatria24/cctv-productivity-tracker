@@ -4,6 +4,7 @@ import hashlib
 import threading
 import time
 import os
+from .person_detection import DetectionTuning, detection_regions, preprocess_yolox, decode_people, split_people
 
 MODEL_PATH = Path(os.environ.get('CCTV_MODEL_DIR', Path(__file__).resolve().parents[2] / 'models')) / "webcam-yolox.onnx"
 # Filled from the pinned OpenCV Zoo LFS object, checked before loading.
@@ -11,13 +12,19 @@ MODEL_SHA256 = "c5c2d13e59ae883e6af3b45daea64af4833a4951c92d116ec270d9ddbe998063
 
 
 class WebcamDetector:
-    def __init__(self, model_path=MODEL_PATH):
+    def __init__(self, model_path=MODEL_PATH, *, tuning=None):
         self.path = model_path
         self.lock = threading.Lock()
         self.session = None
         self.sha = MODEL_SHA256
-        self.manifest = {'license': 'Apache-2.0', 'source': 'OpenCV Zoo YOLOX 47534e27c9851bb1128ccc0102f1145e27f23f98', 'threshold': 0.45, 'tracking_candidate_threshold': 0.1, 'nms_iou': 0.5, 'provider': 'CPUExecutionProvider'}
+        self.tuning = tuning or DetectionTuning()
+        self.manifest = {'license': 'Apache-2.0', 'source': 'OpenCV Zoo YOLOX 47534e27c9851bb1128ccc0102f1145e27f23f98', 'threshold': 0.45, 'nms_iou': 0.5, 'provider': 'CPUExecutionProvider'}
         self.runtime_label = 'YOLOX · CPU'
+        self.manifest.update(threshold=self.tuning.confidence, nms_iou=self.tuning.nms_iou,
+                             tracking_candidate_threshold=self.tuning.tracking_confidence, tracking_candidate_limit=128,
+                             tracking_proposal_limit=1024,
+                             detail=self.tuning.detail, tile_overlap=self.tuning.tile_overlap,
+                             preprocessing='rgb-top-left-letterbox-640', postprocessing='person-separated-confidence-v3')
 
     def _load_backend(self):
         import onnxruntime as ort
@@ -56,35 +63,23 @@ class WebcamDetector:
             if frame is None:
                 raise ValueError("JPEG tidak dapat dibaca")
             h, w = frame.shape[:2]
-            scale = min(640 / w, 640 / h)
-            resized = cv2.resize(frame, (int(w * scale), int(h * scale)))
-            padded = np.full((640, 640, 3), 114, dtype=np.uint8)
-            padded[:resized.shape[0], :resized.shape[1]] = resized
-            blob = cv2.cvtColor(padded, cv2.COLOR_BGR2RGB).transpose(2, 0, 1)[None].astype(np.float32)
-            prepared = time.perf_counter()
-            predictions = self._infer(blob)
-            inferred = time.perf_counter()
-            scores = predictions[:, 4] * predictions[:, 5]  # COCO person class 0
-            valid = (scores >= self.manifest['tracking_candidate_threshold']) & (predictions[:, 5:].argmax(axis=1) == 0)
-            p = predictions[valid]
-            scores = scores[valid]
-            centers = (p[:, :2] + self.grid[valid]) * self.strides[valid]
-            sizes = np.exp(np.clip(p[:, 2:4], -20, 20)) * self.strides[valid]
-            boxes = np.concatenate((centers - sizes / 2, sizes), axis=1) / scale
-            keep = cv2.dnn.NMSBoxes(boxes.tolist(), scores.tolist(), self.manifest['tracking_candidate_threshold'], 0.5)
-            candidates = []
-            for i in np.asarray(keep).reshape(-1):
-                x, y, bw, bh = boxes[i]
-                box = np.clip([x / w, y / h, (x + bw) / w, (y + bh) / h], 0, 1).tolist()
-                if box[2] > box[0] and box[3] > box[1]:
-                    candidates.append({"box": box, "confidence": round(float(scores[i]), 3)})
-            detections = [row for row in candidates if row['confidence'] >= self.manifest['threshold']]
+            boxes, scores = [], []
+            full_frame_count = 0
+            regions = detection_regions(w, h, self.tuning)
+            for region in regions:
+                x0, y0, x1, y1 = region
+                blob, scale = preprocess_yolox(frame[y0:y1, x0:x1])
+                decoded, confidence = decode_people(self._infer(blob), self.grid, self.strides, scale, region, (w, h), self.tuning, include_tracking=True)
+                boxes.extend(decoded.tolist())
+                scores.extend(confidence.tolist())
+                if region == (0, 0, w, h):
+                    full_frame_count = len(boxes)
+            detections, candidates = split_people(boxes, scores, (w, h), self.tuning, full_frame_count=full_frame_count)
             return {"model": self.runtime_label, "source": "WEBCAM_LIVE", "detections": detections,
-                    "tracking_candidates": candidates,
+                    "tracking_candidates": candidates, "tracking_candidate_count": len(candidates),
                     "count": len(detections), "width": w, "height": h,
-                    "preprocess_ms": round((prepared-started)*1000,2), "runtime_ms": round((inferred-prepared)*1000,2),
-                    "postprocess_ms": round((time.perf_counter()-inferred)*1000,2),
-                    "inference_ms": round((time.perf_counter() - started) * 1000), "recorded": False}
+                    "inference_ms": round((time.perf_counter() - started) * 1000), "recorded": False,
+                    "model_passes": len(regions), "detection_profile": 'detail' if self.tuning.detail else 'balanced'}
         finally:
             self.lock.release()
 

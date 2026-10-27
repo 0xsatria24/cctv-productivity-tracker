@@ -12,6 +12,25 @@ from test_live import FixtureDetector
 from test_fleet import Capture, setup_camera
 
 
+def test_backup_verifies_reid_migration_and_accepts_previous_release(tmp_path, monkeypatch):
+    import cctv_tracker.persistence as persistence
+    from cctv_tracker.maintenance import verify_database
+    path = tmp_path / 'previous.sqlite3'
+    with monkeypatch.context() as previous:
+        previous.setattr(persistence, 'MIGRATION_FILES', persistence.MIGRATION_FILES[:4])
+        with closing(Database(path)):
+            pass
+    verify_database(path)
+    with closing(Database(path)) as db:
+        assert db.conn.execute('PRAGMA user_version').fetchone()[0] == 5
+    verify_database(path)
+    with closing(Database(path)) as db:
+        db.conn.execute("UPDATE runtime_migration_checksums SET sha256=? WHERE version=5", ('0' * 64,))
+        db.conn.commit()
+    with pytest.raises(ValueError, match='migration checksum'):
+        verify_database(path)
+
+
 def test_verified_round_trip_includes_config_and_refuses_running_app(tmp_path):
     path = tmp_path / 'site.sqlite3'
     with closing(Database(path)) as db:

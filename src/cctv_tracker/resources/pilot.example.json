@@ -3,6 +3,9 @@
   "camera_id": "camera-1",
   "timezone": "Asia/Jakarta",
   "inference_fps": 5,
+  "scheduling": {"queue_capacity": 64, "max_streams": 128, "max_wait_seconds": 2},
+  "tracking": {"activation_threshold": 0.25, "matching_threshold": 0.8, "lost_buffer_seconds": 1, "confirmation_frames": 1, "max_prediction_steps": 30},
+  "detection": {"confidence": 0.45, "tracking_confidence": 0.1, "nms_iou": 0.5, "detail": false, "tile_overlap": 0.5},
   "sessions": {
     "grace_period_seconds": 10,
     "motion_recovery_seconds": 3.5,

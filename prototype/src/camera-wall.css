@@ -41,6 +41,12 @@
 .camera-tile-heading h2,.camera-tile .panel-heading h2 { font-size:var(--font-caption); font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.camera-tile .panel-heading>div:first-child { min-width:0; }.camera-tile-heading h2 { margin-right:auto; }
 .camera-tile .panel-heading .button,.camera-tile-heading .button { min-width:28px; min-height:28px; padding:4px; }
 .camera-frame { position:relative; width:100%; min-height:0; flex:1; background:var(--surface-video); overflow:hidden; }.camera-frame img { display:block; width:100%; height:100%; object-fit:contain; }
+.live-video-frame:fullscreen { width:100vw; height:100dvh; max-height:none; aspect-ratio:auto; border:0; }
+.live-video-frame:fullscreen > img,.live-video-frame:fullscreen > video { width:100%; height:100%; object-fit:contain; }
+.live-area-layer { position:absolute; pointer-events:none; }
+.live-area-results { padding:12px; background:var(--surface-panel); border:1px solid var(--border-subtle); border-radius:var(--radius-panel); }
+.live-fullscreen-label { margin-left:auto; font-size:11px; color:var(--text-secondary); }
+.live-area-results .replay-workstations { border-top:0; padding-top:0; }
 .rtsp-camera-overlays { position:absolute; pointer-events:none; }.rtsp-camera-overlays text { fill:#d8f5ec; stroke:#101b18; stroke-width:3px; paint-order:stroke; font:12px sans-serif; }.rtsp-zone-outline { fill:none; stroke:var(--accent-default); stroke-width:2; vector-effect:non-scaling-stroke; }
 .rtsp-camera-overlays .rtsp-presence-clock { fill:#fff0bc; font-weight:700; font-variant-numeric:tabular-nums; }
 .track-caption text { fill:#fff0bc; font-weight:700; font-variant-numeric:tabular-nums; }

@@ -14,7 +14,7 @@ import time
 from uuid import uuid4
 
 from .lease import EngineLease
-from .persistence import Database
+from .persistence import Database, MIGRATION_FILES
 from .secure_store import atomic_write, SecureStore
 
 ID = re.compile(r'[0-9]{8}T[0-9]{6}-[0-9a-f]{12}')
@@ -33,12 +33,13 @@ def verify_database(path):
     with closing(sqlite3.connect(path.as_uri() + '?mode=ro', uri=True)) as db:
         if db.execute('PRAGMA integrity_check').fetchone()[0] != 'ok' or db.execute('PRAGMA foreign_key_check').fetchall():
             raise ValueError('Backup database integrity check failed')
-        if db.execute('PRAGMA user_version').fetchone()[0] != 4:
+        version = db.execute('PRAGMA user_version').fetchone()[0]
+        if not 1 <= version <= len(MIGRATION_FILES):
             raise ValueError('Backup schema does not match this release')
         # Verify the complete installed migration chain without mutating the backup.
         from importlib.resources import files
         checks = dict(db.execute('SELECT version,sha256 FROM runtime_migration_checksums'))
-        for i, name in enumerate(('001_initial.sql', '002_assignments.sql', '003_live.sql', '004_person_sessions.sql'), 1):
+        for i, name in enumerate(MIGRATION_FILES[:version], 1):
             if checks.get(i) != hashlib.sha256(files('cctv_tracker').joinpath('resources', name).read_text(encoding='utf-8').encode()).hexdigest():
                 raise ValueError('Backup migration checksum mismatch')
 

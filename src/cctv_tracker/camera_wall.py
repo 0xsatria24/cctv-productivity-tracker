@@ -29,6 +29,7 @@ class PreviewCamera:
 
     def _run(self):
         capture, retry_at, attempts = None, 0, 0
+        opened_at, last_progress, last_frame_ns = 0, None, -1
         try:
             while not self._stop.is_set():
                 if not self._wanted(self.id):
@@ -43,6 +44,7 @@ class PreviewCamera:
                     self._clear('CONNECTING' if not attempts else 'RECONNECTING')
                     try:
                         capture = self._capture_factory(self._url, self._settings)
+                        opened_at, last_progress, last_frame_ns = time.perf_counter(), None, -1
                     except Exception:
                         attempts += 1; retry_at = time.perf_counter() + min(8, 2 ** attempts)
                         self._clear('RECONNECTING', 'RTSP belum dapat dibaca; periksa koneksi kamera.')
@@ -50,7 +52,8 @@ class PreviewCamera:
                 item = capture.read(timeout=0.1)
                 if item and item.get('jpeg'):
                     age = (time.perf_counter_ns() - item['monotonic_ns']) / 1e9
-                    if 0 <= age <= 2.5:
+                    if 0 <= age <= 2.5 and item['monotonic_ns'] > last_frame_ns:
+                        last_progress, last_frame_ns = time.perf_counter(), item['monotonic_ns']
                         with self._lock:
                             self._jpeg, self._at = item['jpeg'], item['monotonic_ns']
                             self._item = item
@@ -58,7 +61,9 @@ class PreviewCamera:
                             self._health, self._error = 'ONLINE', ''
                             self._seq += 1
                         attempts = 0
-                if (item and item.get('error')) or not capture.process.is_alive():
+                deadline = (opened_at + self._settings.open_timeout_seconds + self._settings.read_timeout_seconds
+                            if last_progress is None else last_progress + self._settings.read_timeout_seconds)
+                if (item and item.get('error')) or not capture.process.is_alive() or time.perf_counter() > deadline:
                     capture.close(); capture = None
                     attempts += 1; retry_at = time.perf_counter() + min(8, 2 ** attempts)
                     self._clear('RECONNECTING', 'RTSP terputus; mencoba menghubungkan kembali.')

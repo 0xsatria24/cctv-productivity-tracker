@@ -19,10 +19,10 @@ def test_migration_is_repeatable_and_resources_unchanged(tmp_path):
     path = tmp_path / "tracker.sqlite3"
     for _ in range(2):
         with closing(Database(path)) as db:
-            assert db.conn.execute("PRAGMA user_version").fetchone()[0] == 4
+            assert db.conn.execute("PRAGMA user_version").fetchone()[0] == 5
             assert db.conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
             assert db.conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
-            assert db.conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0] == 4
+            assert db.conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0] == 5
             assert db.conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
 
 
@@ -48,14 +48,15 @@ def test_upgrade_v2_preserves_existing_data_and_checksums(tmp_path):
         with db.transaction() as conn:
             # Recreate an existing v2 database using only this disposable fixture.
             conn.execute('DROP TABLE live_calibrations')
+            conn.execute('DROP TABLE reid_decisions')
             conn.execute('DROP TABLE person_sessions')
             conn.execute('DELETE FROM runtime_migration_checksums WHERE version>=3')
             conn.execute('DELETE FROM schema_migrations WHERE version>=3')
             conn.execute('PRAGMA user_version=2')
     with closing(Database(path)) as db:
-        assert db.conn.execute('PRAGMA user_version').fetchone()[0] == 4
+        assert db.conn.execute('PRAGMA user_version').fetchone()[0] == 5
         assert db.conn.execute('SELECT display_name FROM employees WHERE id=?', (employee,)).fetchone()[0] == 'Migration fixture'
-        assert db.conn.execute('SELECT COUNT(*) FROM runtime_migration_checksums').fetchone()[0] == 4
+        assert db.conn.execute('SELECT COUNT(*) FROM runtime_migration_checksums').fetchone()[0] == 5
 
 
 def test_same_model_weights_retain_different_execution_runtime_per_run(tmp_path):
@@ -79,10 +80,14 @@ def test_replay_sqlite_golden_totals_and_atomic_durability(tmp_path):
         result = replay(ROOT / "tests/fixtures/occupancy-replay.json", config, db)
         assert result["data_sources"] == ["SYNTHETIC_REPLAY"]
         first, second = result["workstations"]
-        assert first["occupied_us"] == 4_000_000
+        # The 0.2 s before the first contradictory frame is unknown, not occupied.
+        assert first["occupied_us"] == 3_800_000
         assert first["empty_us"] == 1_800_000
-        assert first["unknown_us"] == 11_200_000
+        assert first["unknown_us"] == 11_400_000
         assert first["eligible_us"] == 17_000_000
+        import json
+        metadata=json.loads(db.conn.execute('SELECT runtime_manifest_json FROM engine_runs').fetchone()[0])
+        assert metadata['evidence_policy_revision']=='last-supporting-sample-v2'
         assert second["empty_us"] == 6_000_000
         assert second["unknown_us"] == 11_000_000
         assert db.conn.execute("SELECT COUNT(*) FROM occupied_sessions WHERE workspace_id=?", (first["workspace_id"],)).fetchone()[0] == 2

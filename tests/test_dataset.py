@@ -104,7 +104,7 @@ def test_prepare_pts_aspect_ratio_checksums_and_no_overwrite(tmp_path):
     assert len(sequence['frames']) == 3
     assert [f['seconds'] for f in sequence['frames']] == [0,.5,1]
     f=sequence['frames'][0]
-    assert cv2.imread(str(output/f['image'])).shape[:2] == (320,640)
+    assert cv2.imread(str(output/f['image'])).shape[:2] == (400,800)
     assert f['sha256'] == digest(output/f['image'])
     assert validate_labels(m,read_json(output/'labels.json'))
     with pytest.raises(FileExistsError):
@@ -136,7 +136,7 @@ def test_baseline_is_not_ground_truth_and_rejects_modified_image(tmp_path):
     video=tmp_path/'source.mp4'; make_video(video)
     dataset=tmp_path/'dataset'; m=prepare([video],dataset,group='site/day')
     fake=SimpleNamespace(manifest={'source':'SYNTHETIC_TEST'},sha='f'*64,
-                         detect=lambda image:{'width':640,'height':320,'detections':[]})
+                         detect=lambda image:{'width':800,'height':400,'detections':[]})
     result=baseline(dataset,tmp_path/'baseline.json',detector=fake)
     assert result['state'] == 'COMPLETED' and not result['accuracy_evaluated']
     assert not any(row['reviewed'] for row in read_json(dataset/'labels.json')['frames'].values())

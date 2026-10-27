@@ -34,6 +34,17 @@ def test_gap_stops_at_last_evidence_and_requires_new_confirmation():
     assert zone.current.state == State.UNKNOWN
 
 
+def test_first_contradictory_frame_does_not_charge_the_previous_state():
+    zone=ZoneAccumulator(0,Rules())
+    for i in range(16):
+        zone.feed(observation(i/5))
+    zone.feed(observation(3.2,State.EMPTY,0))
+    result=summarize(zone.snapshot(),0,3_200_000)
+    assert result['occupied_us']==1_000_000
+    assert result['unknown_us']==2_200_000
+    assert zone.current.state==State.UNKNOWN
+
+
 def test_unavailable_and_generation_change_never_become_empty():
     zone = ZoneAccumulator(0, Rules())
     for i in range(16):

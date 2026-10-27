@@ -1,0 +1,44 @@
+[
+  {
+    "mainTop": 202.6666717529297,
+    "page": "Ringkasan",
+    "pageWidth": 1265,
+    "smallTargets": 27,
+    "width": 1280
+  },
+  {
+    "mainTop": 202.6666717529297,
+    "page": "Pemantauan Live",
+    "pageWidth": 1265,
+    "smallTargets": 41,
+    "width": 1280
+  },
+  {
+    "mainTop": 202.6666717529297,
+    "page": "Workstation",
+    "pageWidth": 1265,
+    "smallTargets": 40,
+    "width": 1280
+  },
+  {
+    "mainTop": 202.6666717529297,
+    "page": "Analitik",
+    "pageWidth": 1265,
+    "smallTargets": 33,
+    "width": 1280
+  },
+  {
+    "mainTop": 202.6666717529297,
+    "page": "Laporan",
+    "pageWidth": 1265,
+    "smallTargets": 31,
+    "width": 1280
+  },
+  {
+    "mainTop": 202.6666717529297,
+    "page": "Pengaturan",
+    "pageWidth": 1280,
+    "smallTargets": 22,
+    "width": 1280
+  }
+]

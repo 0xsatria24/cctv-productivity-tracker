@@ -26,11 +26,14 @@ class FixtureDetector:
         self.rows = [{'box': [0.1, 0.1, 0.4, 0.8], 'confidence': 0.95}]
         self.width, self.height = 320, 240
         self.fail = False
+        self.candidates = []
 
     def detect(self, _):
         if self.fail:
             raise RuntimeError('Injected inference failure')
-        return {'width': self.width, 'height': self.height, 'detections': [dict(d) for d in self.rows], 'count': len(self.rows), 'model': 'TEST FIXTURE', 'inference_ms': 1}
+        return {'width': self.width, 'height': self.height, 'detections': [dict(d) for d in self.rows],
+                'tracking_candidates': [dict(d) for d in self.candidates],
+                'count': len(self.rows), 'model': 'TEST FIXTURE', 'inference_ms': 1}
 
 
 def wait_for(predicate, seconds=10):
@@ -82,6 +85,27 @@ def test_predicted_display_box_never_enters_measured_counts_or_zone_evidence(liv
     empty=controller.submit(b'fixture',session,4)
     assert empty['count']==0 and empty['zones'][0]['state']=='EMPTY'
     assert empty['display_predictions'][0]['activity']['label'] is None
+
+
+def test_live_confidence_candidate_reaches_tracker_without_counting_time(live):
+    controller,detector=live
+    session=controller.start('WEBCAM_LIVE',camera_key='a'*64)['session_id']
+    wait_for(lambda:controller.snapshot()['status']=='RUNNING')
+    first=controller.submit(b'fixture',session,1)['detections'][0]
+    time.sleep(.15)
+    second=controller.submit(b'fixture',session,2)['detections'][0]
+    assert second['accumulated_duration_us']>0
+    measured=detector.rows
+    detector.candidates=[{**measured[0],'confidence':.2}];detector.rows=[]
+    time.sleep(.15)
+    weak=controller.submit(b'fixture',session,3)
+    assert weak['count']==0 and weak['detections']==[]
+    assert weak['tracking']['matched_tracking_candidates']==1
+    detector.rows=measured;detector.candidates=[]
+    time.sleep(.15)
+    returned=controller.submit(b'fixture',session,4)['detections'][0]
+    assert returned['session_id']==first['session_id']
+    assert returned['accumulated_duration_us']==second['accumulated_duration_us']
 
 
 def test_live_tracking_durations_gap_duplicate_stop_and_database_isolation(live):
@@ -149,10 +173,9 @@ def test_low_candidate_keeps_track_without_incrementing_presence(live):
     measured.update(count=0, detections=[], tracking_candidates=[{'box': [.1, .1, .4, .8], 'confidence': .2}])
     detector.detect = lambda _: dict(measured)
     result = controller.submit(b'fixture', session, 2)
-    assert result['count'] == 1
-    assert result['detections'][0]['track_id'] == original
-    assert result['detections'][0]['confidence'] == pytest.approx(.2)
-    assert result['detections'][0]['workstation_times'] == []
+    assert result['count'] == 0 and result['detections'] == []
+    assert result['tracking']['matched_tracking_candidates'] == 1
+    assert original in result['retained_track_ids']
     assert result['zones'][0]['state'] == 'UNKNOWN'
     assert result['zones'][0]['count'] is None
 
@@ -273,9 +296,9 @@ def test_confirmed_enter_exit_and_no_double_count_with_multiple_people(tmp_path)
             pipeline.feed(people, 1_000_000 + i * 1_000_000, (i + 1) * 1_000_000_000, i + 1, 'generation')
         report = pipeline.finish()
         row = report['workstations'][0]
-        assert row['occupied_us'] == 2_000_000
+        assert row['occupied_us'] == 1_000_000
         assert row['empty_us'] == 1_000_000
-        assert row['unknown_us'] == 4_000_000
+        assert row['unknown_us'] == 5_000_000
         assert db.conn.execute('SELECT COUNT(*) FROM event_log WHERE event_type="ENTER"').fetchone()[0] == 1
         assert db.conn.execute('SELECT COUNT(*) FROM event_log WHERE event_type="EXIT"').fetchone()[0] == 1
 

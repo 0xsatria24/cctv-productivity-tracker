@@ -15,7 +15,7 @@ class FakeDetector:
         self.shapes.append((w,h))
         rows=next(self.results)
         return {'width':w,'height':h,'detections':[d for d in rows if d['confidence']>=.45],
-                'tracking_candidates':rows}
+                'tracking_candidates':[d for d in rows if d['confidence']<.45]}
 
 
 def jpeg():return cv2.imencode('.jpg',np.zeros((480,640,3),np.uint8))[1].tobytes()
@@ -37,7 +37,7 @@ def test_zoom_deduplicates_same_person_but_keeps_low_confidence_separate():
     detector=FakeDetector([[same],[{'box':[.1,.1,.9,.9],'confidence':.8},
                                 {'box':[.1,.01,.3,.05],'confidence':.2}]])
     result=ZoomExperiment(detector,[(.25,0,.5,.5)]).detect(jpeg())
-    assert result['count']==1 and len(result['tracking_candidates'])==2
+    assert result['count']==1 and len(result['tracking_candidates'])==1
     assert result['detections'][0]==same
 
 
